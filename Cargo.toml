@@ -1,0 +1,18 @@
+[package]
+name = "mix_server"
+version = "0.0.0"
+authors = ["David Stainton <dstainton415@gmail.com>"]
+description = "mix network server library"
+keywords = ["cryptography", "network", "mixnet", "anonymity"]
+license = "AGPL-3.0-only"
+
+[dependencies]
+ecdh_wrapper = { path = "../ecdh_wrapper" }
+subtle = "0.6.0"
+sphinxcrypto = "0.0.5"
+mix_link = "0.0.1"
+clear_on_drop = "0.2.3"
+
+[dev-dependencies]
+rustc-serialize = "0.3.24"
+rand = "^0.4.2"
