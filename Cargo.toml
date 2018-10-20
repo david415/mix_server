@@ -10,9 +10,11 @@ license = "AGPL-3.0-only"
 ecdh_wrapper = { path = "../ecdh_wrapper" }
 subtle = "0.6.0"
 sphinxcrypto = "0.0.5"
-mix_link = "0.0.1"
+mix_link = { path = "../mix_link" }
 clear_on_drop = "0.2.3"
 drop_guard = "0.2.1"
+threadpool = "1.7.1"
+
 
 [dev-dependencies]
 rustc-serialize = "0.3.24"
