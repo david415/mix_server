@@ -15,19 +15,46 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 extern crate mix_link;
+extern crate ecdh_wrapper;
 
+use std::sync::{Mutex, Arc};
 use std::net::TcpStream;
 use self::mix_link::sync::Session;
+use self::mix_link::messages::{SessionConfig, PeerAuthenticator};
+use ecdh_wrapper::PrivateKey;
 
 
 pub struct WireWorker {
-
+    session: Option<Arc<Mutex<Session>>>,
+    session_config: Option<SessionConfig>,
 }
 
 impl WireWorker {
-    pub fn new() -> WireWorker {
-        WireWorker{}
+    pub fn new(auth: Box<PeerAuthenticator>, server_keypair: PrivateKey) -> WireWorker {
+        let session_config = SessionConfig {
+            authenticator: auth,
+            authentication_key: server_keypair,
+            peer_public_key: None,
+            additional_data: vec![],
+        };
+        WireWorker{
+            session_config: Some(session_config),
+            session: None,
+        }
+    }
+
+    pub fn on_stream(&mut self, stream: TcpStream) {
+        let mut session = Session::new(self.session_config.take().unwrap(), false).unwrap();
+        session.initialize(stream).unwrap();
+        session = session.into_transport_mode().unwrap();
+        session.finalize_handshake().unwrap();
+
+        self.session = Some(Arc::new(Mutex::new(session)));
+
+        // spawn reader
+
+        // spawn writer
+        
+        
     }
 }
-
-//return fn(stream: TcpStream) {}

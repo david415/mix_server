@@ -15,6 +15,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 extern crate threadpool;
+extern crate ecdh_wrapper;
 
 pub mod server;
 pub mod tcp_listener;

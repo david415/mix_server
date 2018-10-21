@@ -17,7 +17,7 @@
 extern crate threadpool;
 
 use threadpool::ThreadPool;
-use std::thread::{spawn, JoinHandle};
+use std::thread::spawn;
 use std::sync::mpsc::channel;
 use std::net::{TcpListener, TcpStream};
 
