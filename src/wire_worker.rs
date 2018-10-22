@@ -19,27 +19,33 @@ extern crate ecdh_wrapper;
 
 use std::sync::{Mutex, Arc};
 use std::net::TcpStream;
+use std::thread;
+use std::sync::mpsc;
+
 use self::mix_link::sync::Session;
 use self::mix_link::messages::{SessionConfig, PeerAuthenticator};
+use self::mix_link::commands::Command;
 use ecdh_wrapper::PrivateKey;
 
 
-pub struct WireWorker {
+pub struct WireHandshakeWorker {
     session: Option<Arc<Mutex<Session>>>,
     session_config: Option<SessionConfig>,
+    chan: mpsc::SyncSender<Arc<Mutex<Session>>>,
 }
 
-impl WireWorker {
-    pub fn new(auth: Box<PeerAuthenticator>, server_keypair: PrivateKey) -> WireWorker {
+impl WireHandshakeWorker {
+    pub fn new(auth: PeerAuthenticator, server_keypair: PrivateKey, consumer_chan: mpsc::SyncSender<Arc<Mutex<Session>>>) -> WireHandshakeWorker {
         let session_config = SessionConfig {
             authenticator: auth,
             authentication_key: server_keypair,
             peer_public_key: None,
             additional_data: vec![],
         };
-        WireWorker{
+        WireHandshakeWorker{
             session_config: Some(session_config),
             session: None,
+            chan: consumer_chan,
         }
     }
 
@@ -48,13 +54,37 @@ impl WireWorker {
         session.initialize(stream).unwrap();
         session = session.into_transport_mode().unwrap();
         session.finalize_handshake().unwrap();
-
         self.session = Some(Arc::new(Mutex::new(session)));
+        let s = self.session.take().unwrap().clone();
+        self.chan.send(self.session.take().unwrap());
+    }
+}
 
-        // spawn reader
 
-        // spawn writer
-        
-        
+pub struct WireWorker {
+    reader_chan: mpsc::SyncSender<Command>,
+    writer_chan: mpsc::Receiver<Command>,
+}
+
+impl WireWorker {
+    pub fn new(reader_chan: mpsc::SyncSender<Command>, writer_chan: mpsc::Receiver<Command>) -> WireWorker {
+        WireWorker{
+            writer_chan: writer_chan,
+            reader_chan: reader_chan,
+        }
+    }
+
+    pub fn reader(&self, session: Arc<Mutex<Session>>) {
+        loop {
+            let cmd = session.lock().unwrap().recv_command().unwrap();
+            self.reader_chan.send(cmd);
+        }
+    }
+
+    pub fn writer(&self, session: Arc<Mutex<Session>>) {
+        loop {
+            let cmd = self.writer_chan.recv().unwrap();
+            session.lock().unwrap().send_command(&cmd).unwrap();
+        }
     }
 }
