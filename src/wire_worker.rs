@@ -1,3 +1,4 @@
+
 // wire_worker.rs - Wire protocol worker.
 // Copyright (C) 2018  David Anthony Stainton.
 //
@@ -20,6 +21,7 @@ extern crate ecdh_wrapper;
 use std::sync::{Mutex, Arc};
 use std::net::TcpStream;
 use std::thread;
+use std::thread::JoinHandle;
 use std::sync::mpsc;
 
 use self::mix_link::sync::Session;
@@ -62,29 +64,39 @@ impl WireHandshakeWorker {
 
 
 pub struct WireWorker {
-    reader_chan: mpsc::SyncSender<Command>,
-    writer_chan: mpsc::Receiver<Command>,
+    reader_chan: Arc<Mutex<mpsc::SyncSender<Command>>>,
+    reader_handle: Option<JoinHandle<()>>,
+    writer_chan: Arc<Mutex<mpsc::Receiver<Command>>>,
+    writer_handle: Option<JoinHandle<()>>,
 }
 
 impl WireWorker {
     pub fn new(reader_chan: mpsc::SyncSender<Command>, writer_chan: mpsc::Receiver<Command>) -> WireWorker {
         WireWorker{
-            writer_chan: writer_chan,
-            reader_chan: reader_chan,
+            writer_chan: Arc::new(Mutex::new(writer_chan)),
+            writer_handle: None,
+            reader_chan: Arc::new(Mutex::new(reader_chan)),
+            reader_handle: None,
         }
     }
 
-    pub fn reader(&self, session: Arc<Mutex<Session>>) {
-        loop {
-            let cmd = session.lock().unwrap().recv_command().unwrap();
-            self.reader_chan.send(cmd);
-        }
+    pub fn reader(&mut self, session: Arc<Mutex<Session>>) {
+        let ch = self.reader_chan.clone();
+        self.reader_handle = Some(thread::spawn(move || {
+            loop {
+                let cmd = session.lock().unwrap().recv_command().unwrap();
+                ch.lock().unwrap().send(cmd);
+            }
+        }));
     }
 
-    pub fn writer(&self, session: Arc<Mutex<Session>>) {
-        loop {
-            let cmd = self.writer_chan.recv().unwrap();
-            session.lock().unwrap().send_command(&cmd).unwrap();
-        }
+    pub fn writer(&mut self, session: Arc<Mutex<Session>>) {
+        let ch = self.writer_chan.clone();
+        self.writer_handle = Some(thread::spawn(move || {
+            loop {
+                let cmd = ch.lock().unwrap().recv().unwrap();
+                session.lock().unwrap().send_command(&cmd).unwrap();
+            }
+        }));
     }
 }
