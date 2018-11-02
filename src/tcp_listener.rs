@@ -16,65 +16,50 @@
 
 extern crate threadpool;
 
-use threadpool::ThreadPool;
+use std::thread;
 use std::thread::spawn;
+use std::thread::JoinHandle;
+use std::sync::{Mutex, Arc};
 use std::sync::mpsc::channel;
+use std::sync::mpsc;
 use std::net::{TcpListener, TcpStream};
-
-#[derive(Copy, Clone)]
-pub struct TcpStreamHandler {
-    handler: fn(TcpStream)
-}
-
-impl TcpStreamHandler {
-    pub fn new(handler: fn(TcpStream)) -> TcpStreamHandler {
-        TcpStreamHandler{
-            handler: handler,
-        }
-    }
-
-    fn handle_stream(&self, stream: TcpStream) {
-        (self.handler)(stream);
-    }
-}
 
 
 pub struct TcpStreamFount {
-    thread_pool: Option<ThreadPool>,
     listen_addr: String,
     tcp_listener: Option<TcpListener>,
-    stream_handler: TcpStreamHandler,
+    stream_chan: Arc<Mutex<mpsc::SyncSender<TcpStream>>>,
+    job_handle: Option<JoinHandle<()>>,
 }
 
 impl TcpStreamFount {
-    pub fn new(listen_addr: String, pool_size: usize, stream_handler: TcpStreamHandler) -> TcpStreamFount {
-        let f = TcpStreamFount{
-            thread_pool: Some(ThreadPool::new(pool_size)),
+    pub fn new(listen_addr: String, chan: mpsc::SyncSender<TcpStream>) -> TcpStreamFount {
+        TcpStreamFount{
             listen_addr: listen_addr,
             tcp_listener: None,
-            stream_handler: stream_handler,
-        };
-        f
+            stream_chan: Arc::new(Mutex::new(chan)),
+            job_handle: None,
+        }
     }
 
     pub fn run(&mut self) {
         let listener = TcpListener::bind(self.listen_addr.clone()).unwrap();
-        let handler = self.stream_handler;
-        for maybe_stream in listener.incoming() {
-            match maybe_stream {
-                Ok(stream) => {
-                    self.thread_pool.take().unwrap().execute(move || {
-                        handler.handle_stream(stream);
-                    });
-                }
-                Err(_) => {
-                    return;
+        let ch = self.stream_chan.clone();
+        self.job_handle = Some(thread::spawn(move || {
+            for maybe_stream in listener.incoming() {
+                match maybe_stream {
+                    Ok(stream) => {
+                        ch.lock().unwrap().send(stream);
+                    }
+                    Err(_) => {
+                        return;
+                    }
                 }
             }
-        }
+        }));
     }
 
     pub fn halt(&mut self) {
-        drop(self.thread_pool.take());
+        drop(self.job_handle.take());
     }
 }

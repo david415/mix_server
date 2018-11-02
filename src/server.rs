@@ -15,7 +15,9 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use std::net::TcpStream;
-use super::tcp_listener::{TcpStreamFount, TcpStreamHandler};
+use std::sync::mpsc;
+
+use super::tcp_listener::TcpStreamFount;
 
 
 pub struct Config {
@@ -26,7 +28,6 @@ pub struct Config {
 pub struct Server {
     config: Config,
     stream_fount: Option<TcpStreamFount>,
-    stream_handler: Option<TcpStreamHandler>,
 }
 
 impl Server {
@@ -35,13 +36,12 @@ impl Server {
         Server {
             config: cfg,
             stream_fount: None,
-            stream_handler: None,
         }
     }
 
     pub fn run(&mut self, handler: fn(TcpStream)) {
-        self.stream_handler = Some(TcpStreamHandler::new(handler));
-        self.stream_fount = Some(TcpStreamFount::new(self.config.listen_addr.clone(), self.config.listener_pool_size, self.stream_handler.unwrap()));
+        let (snd, rcv) = mpsc::sync_channel(0);
+        self.stream_fount = Some(TcpStreamFount::new(self.config.listen_addr.clone(), snd));
         self.stream_fount.take().unwrap().run();
     }
 }

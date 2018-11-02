@@ -31,7 +31,6 @@ use ecdh_wrapper::PrivateKey;
 
 
 pub struct WireHandshakeWorker {
-    session: Option<Arc<Mutex<Session>>>,
     session_config: Option<SessionConfig>,
     chan: mpsc::SyncSender<Arc<Mutex<Session>>>,
 }
@@ -46,19 +45,17 @@ impl WireHandshakeWorker {
         };
         WireHandshakeWorker{
             session_config: Some(session_config),
-            session: None,
             chan: consumer_chan,
         }
     }
 
-    pub fn on_stream(&mut self, stream: TcpStream) {
-        let mut session = Session::new(self.session_config.take().unwrap(), false).unwrap();
+    fn on_stream(&mut self, stream: TcpStream) {
+        let cfg = self.session_config.clone().unwrap();
+        let mut session = Session::new(cfg.clone(), false).unwrap();
         session.initialize(stream).unwrap();
         session = session.into_transport_mode().unwrap();
         session.finalize_handshake().unwrap();
-        self.session = Some(Arc::new(Mutex::new(session)));
-        let s = self.session.take().unwrap().clone();
-        self.chan.send(self.session.take().unwrap());
+        self.chan.send(Arc::new(Mutex::new(session)));
     }
 }
 
