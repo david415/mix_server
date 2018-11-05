@@ -70,11 +70,22 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn load(file: String) -> Result<Config, ConfigError> {
+    pub fn load(contents: String) -> Result<Config, ConfigError> {
+        let config: Config = toml::from_str(&contents)?;
+        Ok(config)
+    }
+
+    pub fn load_file(file: String) -> Result<Config, ConfigError> {
         let mut file = File::open(file)?;
         let mut contents = String::new();
         file.read_to_string(&mut contents)?;
-        let config: Config = toml::from_str(&contents)?;
-        Ok(config)
+        Ok(Config::load(contents)?)
+    }
+
+    pub fn store(&self, file_name: String) -> Result<(), ConfigError> {
+        let mut file = File::create(file_name)?;
+        let toml_config = toml::to_string(&self).unwrap();
+        file.write_all(toml_config.as_bytes())?;
+        Ok(())
     }
 }
