@@ -7,15 +7,23 @@ keywords = ["cryptography", "network", "mixnet", "anonymity"]
 license = "AGPL-3.0-only"
 
 [dependencies]
-ecdh_wrapper = "0.0.5"
+clap = "2.32.0"
+toml = "0.4"
+serde_derive = "1.0.80"
+serde = "1.0.80"
+log = "0.4.3"
+log4rs = "0.8.0"
+ecdh_wrapper = "0.0.6"
 subtle = "0.6.0"
 sphinxcrypto = "0.0.10"
-#mix_link = "0.0.2"
 mix_link = { path = "../mix_link" }
 clear_on_drop = "0.2.3"
 drop_guard = "0.2.1"
-threadpool = "1.7.1"
 
 [dev-dependencies]
 rustc-serialize = "0.3.24"
 rand = "^0.4.2"
+
+[[bin]]
+name = "server"
+doc = false

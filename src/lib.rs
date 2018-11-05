@@ -14,12 +14,24 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-extern crate threadpool;
+#[macro_use]
+extern crate serde_derive;
+extern crate serde;
+
+#[macro_use]
+extern crate log;
+extern crate log4rs;
 extern crate ecdh_wrapper;
+extern crate mix_link;
+extern crate toml;
+
 
 pub mod server;
-pub mod tcp_listener;
-pub mod wire_worker;
+pub mod config;
+pub mod errors;
+//
+//pub mod tcp_listener;
+//pub mod wire_worker;
 
 
 #[cfg(test)]
@@ -43,7 +55,7 @@ mod tests {
             let mut key = ClearOnDrop::new(&mut keypair);
             let mut rng = OsRng::new().unwrap();
             assert_eq!(key.to_vec(), zeros);
-            key.regenerate(&mut rng);
+            key.regenerate(&mut rng).unwrap();
             assert_ne!(key.to_vec(), zeros);
         }   // key is dropped here
         assert_eq!(keypair, PrivateKey::default());
@@ -57,7 +69,7 @@ mod tests {
 
         {
             let mut rng = OsRng::new().unwrap();
-            keypair.regenerate(&mut rng);
+            keypair.regenerate(&mut rng).unwrap();
             assert_ne!(keypair.to_vec(), zeros);
 
             // The guard must have a name. _ will drop it instantly, which would lead to unexpected results

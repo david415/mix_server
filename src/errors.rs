@@ -14,6 +14,50 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::error::{Error};
+//! Mix server error types.
 
+use std::error::Error;
+use std::fmt;
+use toml;
 
+#[derive(Debug)]
+pub enum ConfigError {
+    IoError(std::io::Error),
+    TomlError(toml::de::Error),
+}
+
+impl fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use self::ConfigError::*;
+        match self {
+            IoError(x) => x.fmt(f),
+            TomlError(x) => x.fmt(f),
+        }
+    }
+}
+
+impl Error for ConfigError {
+    fn description(&self) -> &str {
+        "I'm a ConfigError."
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        use self::ConfigError::*;
+        match self {
+            IoError(x) => x.cause(),
+            TomlError(x) => x.cause(),
+        }
+    }
+}
+
+impl From<std::io::Error> for ConfigError {
+    fn from(error: std::io::Error) -> Self {
+        ConfigError::IoError(error)
+    }
+}
+
+impl From<toml::de::Error> for ConfigError {
+    fn from(error: toml::de::Error) -> Self {
+        ConfigError::TomlError(error)
+    }
+}

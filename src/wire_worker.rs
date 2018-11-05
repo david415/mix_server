@@ -1,4 +1,3 @@
-
 // wire_worker.rs - Wire protocol worker.
 // Copyright (C) 2018  David Anthony Stainton.
 //
@@ -32,11 +31,16 @@ use ecdh_wrapper::PrivateKey;
 
 pub struct WireHandshakeWorker {
     session_config: Option<SessionConfig>,
-    chan: mpsc::SyncSender<Arc<Mutex<Session>>>,
+    wire_worker_chan: mpsc::SyncSender<Arc<Session>>,
+    tcp_fount_chan: mpsc::Receiver<TcpStream>,
+    job_handle: Option<JoinHandle<()>>,
 }
 
 impl WireHandshakeWorker {
-    pub fn new(auth: PeerAuthenticator, server_keypair: PrivateKey, consumer_chan: mpsc::SyncSender<Arc<Mutex<Session>>>) -> WireHandshakeWorker {
+    pub fn new(auth: PeerAuthenticator, server_keypair: PrivateKey,
+               tcp_fount_chan: mpsc::Receiver<TcpStream>,
+               wire_worker_chan: mpsc::SyncSender<Arc<Mutex<Session>>>) -> WireHandshakeWorker {
+
         let session_config = SessionConfig {
             authenticator: auth,
             authentication_key: server_keypair,
@@ -45,7 +49,8 @@ impl WireHandshakeWorker {
         };
         WireHandshakeWorker{
             session_config: Some(session_config),
-            chan: consumer_chan,
+            tcp_fount_chan: Some(tcp_fount_chan),
+            wire_worker_chan: wire_worker_chan,
         }
     }
 
@@ -55,7 +60,20 @@ impl WireHandshakeWorker {
         session.initialize(stream).unwrap();
         session = session.into_transport_mode().unwrap();
         session.finalize_handshake().unwrap();
-        self.chan.send(Arc::new(Mutex::new(session)));
+        self.wire_worker_chan.send(Arc::new(session));
+    }
+
+    fn run(&mut self) {
+        self.job_handle = Some(thread::spawn(move || {
+            loop {
+                let tcp_stream = self.tcp_found_chan.recv().unwrap();
+                self.on_stream(tcp_stream);
+            }
+        }));
+    }
+
+    pub fn halt(&mut self) {
+        drop(self.job_handle.take());
     }
 }
 
@@ -77,7 +95,7 @@ impl WireWorker {
         }
     }
 
-    pub fn reader(&mut self, session: Arc<Mutex<Session>>) {
+    pub fn reader(&mut self, session: Arc<Session>) {
         let ch = self.reader_chan.clone();
         self.reader_handle = Some(thread::spawn(move || {
             loop {
@@ -87,7 +105,7 @@ impl WireWorker {
         }));
     }
 
-    pub fn writer(&mut self, session: Arc<Mutex<Session>>) {
+    pub fn writer(&mut self, session: Arc<Session>) {
         let ch = self.writer_chan.clone();
         self.writer_handle = Some(thread::spawn(move || {
             loop {
@@ -95,5 +113,10 @@ impl WireWorker {
                 session.lock().unwrap().send_command(&cmd).unwrap();
             }
         }));
+    }
+
+    pub fn halt(&mut self) {
+        drop(self.writer_handle.take());
+        drop(self.reader_handle.take());
     }
 }

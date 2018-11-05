@@ -14,34 +14,43 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::net::TcpStream;
-use std::sync::mpsc;
+use std::path::Path;
+use log4rs::encode::pattern::PatternEncoder;
+use log::LevelFilter;
 
-use super::tcp_listener::TcpStreamFount;
+use super::config::Config;
 
 
-pub struct Config {
-    listen_addr: String,
-    listener_pool_size: usize,
+fn init_logger(log_dir: &str) {
+    use log4rs::config::{Appender, Root};
+    use log4rs::config::Config as Log4rsConfig;
+    use log4rs::append::file::FileAppender;
+    let log_path = Path::new(log_dir).join("mixnet_server.log");
+    let file_appender = FileAppender::builder()
+        .encoder(Box::new(PatternEncoder::new("{d} - {m}{n}")))
+        .build(log_path)
+        .unwrap();
+    let config = Log4rsConfig::builder()
+        .appender(Appender::builder().build("mixnet_server", Box::new(file_appender)))
+        .build(Root::builder().appender("mixnet_server").build(LevelFilter::Info)) // XXX
+        .unwrap();
+    let _handle = log4rs::init_config(config).unwrap();
 }
 
 pub struct Server {
-    config: Config,
-    stream_fount: Option<TcpStreamFount>,
+    cfg: Config,
 }
 
 impl Server {
-
     pub fn new(cfg: Config) -> Server {
-        Server {
-            config: cfg,
-            stream_fount: None,
-        }
+        let s = Server {
+            cfg: cfg,
+        };
+        init_logger(s.cfg.logging.log_file.as_str());
+        s
     }
 
-    pub fn run(&mut self, handler: fn(TcpStream)) {
-        let (snd, rcv) = mpsc::sync_channel(0);
-        self.stream_fount = Some(TcpStreamFount::new(self.config.listen_addr.clone(), snd));
-        self.stream_fount.take().unwrap().run();
+    pub fn run(&mut self) {
+        info!("mixnet_server is still in pre-alpha. DO NOT DEPEND ON IT FOR STRONG SECURITY OR ANONYMITY.");
     }
 }
