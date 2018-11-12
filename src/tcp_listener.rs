@@ -14,30 +14,25 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-extern crate threadpool;
-
 use std::thread;
-use std::thread::spawn;
 use std::thread::JoinHandle;
 use std::sync::{Mutex, Arc};
-use std::sync::mpsc::channel;
-use std::sync::mpsc;
 use std::net::{TcpListener, TcpStream};
+
+use crossbeam_channel::Sender;
 
 
 pub struct TcpStreamFount {
     listen_addr: String,
-    tcp_listener: Option<TcpListener>,
-    stream_chan: Arc<Mutex<mpsc::SyncSender<TcpStream>>>,
+    stream_chan: Sender<TcpStream>,
     job_handle: Option<JoinHandle<()>>,
 }
 
 impl TcpStreamFount {
-    pub fn new(listen_addr: String, chan: mpsc::SyncSender<TcpStream>) -> TcpStreamFount {
+    pub fn new(listen_addr: String, chan: Sender<TcpStream>) -> TcpStreamFount {
         TcpStreamFount{
             listen_addr: listen_addr,
-            tcp_listener: None,
-            stream_chan: Arc::new(Mutex::new(chan)),
+            stream_chan: chan,
             job_handle: None,
         }
     }
@@ -49,7 +44,9 @@ impl TcpStreamFount {
             for maybe_stream in listener.incoming() {
                 match maybe_stream {
                     Ok(stream) => {
-                        ch.lock().unwrap().send(stream);
+                        if let Err(e) = ch.send(stream) {
+                            warn!("send failure: {}", e);
+                        }
                     }
                     Err(_) => {
                         return;

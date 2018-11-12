@@ -18,20 +18,27 @@
 extern crate serde_derive;
 extern crate serde;
 
+extern crate crossbeam;
+extern crate crossbeam_utils;
+extern crate crossbeam_thread;
+extern crate crossbeam_channel;
+
 #[macro_use]
 extern crate log;
 extern crate log4rs;
+extern crate toml;
+extern crate clear_on_drop;
+
 extern crate ecdh_wrapper;
 extern crate mix_link;
-extern crate toml;
 
 
 pub mod server;
 pub mod config;
 pub mod errors;
-//pub mod wire_worker;
-//pub mod tcp_listener;
-
+pub mod wire_worker;
+pub mod tcp_listener;
+pub mod packet;
 
 
 #[cfg(test)]

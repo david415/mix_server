@@ -34,7 +34,7 @@ pub struct Server {
     pub addresses: Vec<String>,
     pub data_dir: String,
     pub is_provider: bool,
-    pub num_listeners: u16,
+    pub num_wire_workers: u16,
     pub num_sphinx_workers: u16,
 }
 

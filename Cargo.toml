@@ -14,11 +14,14 @@ serde = "1.0.80"
 log = "0.4.3"
 log4rs = "0.8.0"
 ecdh_wrapper = "0.0.6"
-subtle = "0.6.0"
-sphinxcrypto = "0.0.10"
+sphinxcrypto = "0.0.12"
 mix_link = { path = "../mix_link" }
 clear_on_drop = "0.2.3"
 drop_guard = "0.2.1"
+crossbeam = "0.5.0"
+crossbeam-thread = "0.0.0"
+crossbeam-channel = "0.3.0"
+crossbeam-utils = "0.6.1"
 
 [dev-dependencies]
 rustc-serialize = "0.3.24"

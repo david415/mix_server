@@ -16,70 +16,136 @@
 
 extern crate mix_link;
 extern crate ecdh_wrapper;
+extern crate crossbeam;
+extern crate crossbeam_utils;
+extern crate crossbeam_thread;
+extern crate crossbeam_channel;
 
-use std::sync::{Mutex, Arc};
+use std::sync::{Mutex, Arc, Barrier};
 use std::net::TcpStream;
-use std::thread;
-use std::thread::JoinHandle;
-use std::sync::mpsc;
+
+use crossbeam_utils::thread;
+use crossbeam::thread::{ScopedJoinHandle, ScopedThreadBuilder};
+use crossbeam_channel::{Receiver, Sender, unbounded};
 
 use self::mix_link::sync::Session;
+use self::mix_link::errors::HandshakeError;
 use self::mix_link::messages::{SessionConfig, PeerAuthenticator};
 use self::mix_link::commands::Command;
 use ecdh_wrapper::PrivateKey;
 
+use packet::Packet;
+use super::tcp_listener::TcpStreamFount;
 
+#[derive(Clone)]
 pub struct WireWorker {
-    session_config: Option<SessionConfig>,
-    reader_chan: Arc<Mutex<mpsc::SyncSender<Command>>>,
-    reader_handle: Option<JoinHandle<()>>,
-    writer_chan: Arc<Mutex<mpsc::Receiver<Command>>>,
-    writer_handle: Option<JoinHandle<()>>,
+    link_private_key: PrivateKey,
+    tcp_fount_rx: Receiver<TcpStream>,
+    reader_tx: Sender<Session>,
+    reader_rx: Receiver<Session>,
+    writer_tx: Sender<Session>,
+    writer_rx: Receiver<Session>,
+    crypto_worker_tx: Sender<Packet>,
+    barrier: Arc<Barrier>,
+    peer_auth: PeerAuthenticator
 }
 
 impl WireWorker {
-    pub fn new(auth: PeerAuthenticator, server_keypair: PrivateKey, reader_chan: mpsc::SyncSender<Command>, writer_chan: mpsc::Receiver<Command>) -> WireWorker {
-        let session_config = SessionConfig {
-            authenticator: auth,
-            authentication_key: server_keypair,
-            peer_public_key: None,
-            additional_data: vec![],
-        };
+    pub fn new(peer_auth: PeerAuthenticator, link_private_key: PrivateKey, tcp_fount_rx: Receiver<TcpStream>, crypto_worker_tx: Sender<Packet>) -> WireWorker {
+        let (reader_tx, reader_rx) = unbounded();
+        let (writer_tx, writer_rx) = unbounded();
+
         WireWorker{
-            session_config: Some(session_config),
-            writer_chan: Arc::new(Mutex::new(writer_chan)),
-            writer_handle: None,
-            reader_chan: Arc::new(Mutex::new(reader_chan)),
-            reader_handle: None,
+            link_private_key: link_private_key,
+            tcp_fount_rx: tcp_fount_rx,
+            crypto_worker_tx: crypto_worker_tx,
+            barrier: Arc::new(Barrier::new(3)),
+            peer_auth: peer_auth,
+            reader_tx: reader_tx,
+            reader_rx: reader_rx,
+            writer_tx: writer_tx,
+            writer_rx: writer_rx,
         }
     }
 
-    pub fn on_stream(mut self, stream: TcpStream) {
-        let cfg = self.session_config.clone().unwrap();
-        let mut session = Session::new(cfg.clone(), false).unwrap();
-        session.initialize(stream).unwrap();
-        session = session.into_transport_mode().unwrap();
-        session.finalize_handshake().unwrap();
-        let writer_session = Arc::new(session);
-        let reader_session = writer_session.clone();
-        let reader_ch = self.reader_chan.clone();
-        self.reader_handle = Some(thread::spawn(move || {
-            loop {
-                let cmd = reader_session.recv_command().unwrap();
-                reader_ch.lock().unwrap().send(cmd);
+    pub fn create_session(&self, session_config: SessionConfig, stream: TcpStream) -> Result<Session, HandshakeError> {
+        let mut session = Session::new(session_config, false)?;
+        session.initialize(stream)?;
+        session = session.into_transport_mode()?;
+        session.finalize_handshake()?;
+        Ok(session)
+    }
+
+    fn get_authenticator(&mut self) -> PeerAuthenticator {
+        self.peer_auth.clone()
+    }
+
+    pub fn stream_dispatcher(&mut self) {
+        loop {
+            if let Ok(stream) = self.tcp_fount_rx.recv() {
+                let authenticator = self.get_authenticator();
+                let session_config = SessionConfig{
+                    authenticator: authenticator,
+                    authentication_key: self.link_private_key,
+                    peer_public_key: None,
+                    additional_data: vec![],
+                };
+                let session = match self.create_session(session_config, stream) {
+                    Ok(x) => x,
+                    Err(e) => {
+                        error!("session creation failure: {}", e);
+                        self.halt();
+                        return
+                    }
+                };
+                let session_writer = session.clone();
+                if let Err(e) = self.reader_tx.send(session) {
+                    warn!("shutting down wire worker because of a failure to dispatch session to reader thread: {}", e);
+                    self.halt();
+                    return
+                }
+                if let Err(e) = self.writer_tx.send(session_writer) {
+                    warn!("shutting down wire worker because of a failure to dispatch session to writer thread: {}", e);
+                    self.halt();
+                    return
+                }
+                let barrier = self.barrier.clone();
+                barrier.wait();
+            } else {
+                warn!("fount chan recv failure, halting wire worker.");
+                self.halt();
+                return
             }
-        }));
-        let writer_ch = self.writer_chan.clone();
-        self.writer_handle = Some(thread::spawn(move || {
-            loop {
-                let cmd = writer_ch.lock().unwrap().recv().unwrap();
-                writer_session.send_command(&cmd).unwrap();
-            }
-        }));
+        }
+    }
+
+    pub fn reader(&mut self) {}
+
+    pub fn writer(&mut self) {}
+
+    pub fn run(&mut self) {
+        if let Err(_) = thread::scope(|scope| {
+            let mut worker = self.clone();
+            let mut reader = self.clone();
+            let mut writer = self.clone();
+            let dispatcher_handle = Some(scope.spawn(move |_| {
+                worker.stream_dispatcher();
+            }));
+            let reader_handle = Some(scope.spawn(move |_| {
+                reader.reader();
+            }));
+            let writer_handle = Some(scope.spawn(move |_| {
+                writer.writer();
+            }));
+
+        }) {
+            warn!("wire worker failed to spawn thread(s)");
+        }
     }
 
     pub fn halt(&mut self) {
-        drop(self.writer_handle.take());
-        drop(self.reader_handle.take());
+        // XXX fix me
+        //drop(self.writer_handle.take());
+        //drop(self.reader_handle.take());
     }
 }
