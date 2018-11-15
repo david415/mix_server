@@ -59,11 +59,13 @@ fn create_session(session_config: SessionConfig, stream: TcpStream) -> Result<Se
 
 fn session_dispatcher<T: PeerAuthenticatorFactory + Send>(reader_tx: Sender<Session>, barrier: Arc<Barrier>, cfg: WireConfig, peer_auth_factory: T) {
     loop {
+        println!("dispatcher before barrier");
         barrier.wait();
+        println!("dispatcher after barrier");
         if let Ok(stream) = cfg.tcp_fount_rx.recv() {
             let session_config = SessionConfig{
                 authenticator: peer_auth_factory.build(),
-                authentication_key: cfg.link_private_key,
+                authentication_key: cfg.link_private_key.clone(),
                 peer_public_key: None,
                 additional_data: vec![],
             };
@@ -87,7 +89,9 @@ fn session_dispatcher<T: PeerAuthenticatorFactory + Send>(reader_tx: Sender<Sess
 
 fn reader(reader_rx: Receiver<Session>, barrier: Arc<Barrier>) {
     loop {
+        println!("reader before barrier");
         barrier.wait();
+        println!("reader after barrier");
         if let Ok(mut session) = reader_rx.recv() {
             if let Ok(cmd) = session.recv_command() {
                 println!("server received command {:?}", cmd);
@@ -102,11 +106,16 @@ fn reader(reader_rx: Receiver<Session>, barrier: Arc<Barrier>) {
 }
 
 pub fn start_wire_worker<T: PeerAuthenticatorFactory + Send>(cfg: WireConfig, peer_auth_factory: T) {
+    start_wire_worker_runner(cfg, peer_auth_factory);
+}
+
+pub fn start_wire_worker_runner<T: PeerAuthenticatorFactory + Send>(cfg: WireConfig, peer_auth_factory: T) {
     let barrier = Arc::new(Barrier::new(2));
     let (reader_tx, reader_rx) = unbounded();
     let dispatcher_barrier = barrier.clone();
     let reader_barrier = barrier.clone();
 
+    println!("yo1");
     if let Err(_) = thread::scope(|scope| {
         let mut thread_handles = vec![];
         thread_handles.push(Some(scope.spawn(move |_| {
@@ -119,16 +128,47 @@ pub fn start_wire_worker<T: PeerAuthenticatorFactory + Send>(cfg: WireConfig, pe
         warn!("wire worker failed to spawn thread(s)");
         return
     }
+    println!("yo2");
 }
 
 
 #[cfg(test)]
 mod tests {
+    extern crate ecdh_wrapper;
+    extern crate mix_link;
+    extern crate rand;
+
+    use std::collections::HashMap;
+    use self::rand::os::OsRng;
+    use ecdh_wrapper::{PrivateKey, PublicKey};
+    use mix_link::messages::{SessionConfig, PeerAuthenticator, ServerAuthenticatorState};
+
+    use super::super::server::{NaivePeerAuthenticatorFactory};
+    use super::super::wire_worker::{start_wire_worker};
+    use super::*;
 
     #[test]
     fn basic_wire_worker_test() {
-
-
-        //start_wire_worker()
+        let mut rng = OsRng::new().unwrap();
+        let mix_priv_key = PrivateKey::generate(&mut rng).unwrap();
+        let upstream_mix_priv_key = PrivateKey::generate(&mut rng).unwrap();
+        let mut mix_map: HashMap<PublicKey, bool> = HashMap::new();
+        mix_map.insert(upstream_mix_priv_key.public_key(), true);
+        let peer_auth = PeerAuthenticator::Server(ServerAuthenticatorState{
+            mix_map: mix_map,
+        });
+        let peer_auth_factory = NaivePeerAuthenticatorFactory{
+            peer_auth: peer_auth,
+        };
+        let (tcp_fount_tx, tcp_fount_rx) = unbounded();
+        let (crypto_worker_tx, crypto_worker_rx) = unbounded();
+        let cfg = WireConfig {
+            link_private_key: mix_priv_key,
+            tcp_fount_rx: tcp_fount_rx,
+            crypto_worker_tx: crypto_worker_tx,
+        };
+        println!("before start wire worker");
+        start_wire_worker(cfg, peer_auth_factory);
+        println!("after start wire worker");
     }
 }

@@ -15,7 +15,6 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 extern crate crossbeam_channel;
-extern crate clear_on_drop;
 extern crate ecdh_wrapper;
 extern crate mix_link;
 
@@ -24,7 +23,6 @@ use std::path::Path;
 use log4rs::encode::pattern::PatternEncoder;
 use log::LevelFilter;
 use crossbeam_channel::unbounded;
-use clear_on_drop::ClearOnDrop;
 
 use ecdh_wrapper::PrivateKey;
 use self::mix_link::messages::{SessionConfig, PeerAuthenticator};
@@ -50,8 +48,8 @@ fn init_logger(log_dir: &str) {
     let _handle = log4rs::init_config(config).unwrap();
 }
 
-struct NaivePeerAuthenticatorFactory {
-    peer_auth: PeerAuthenticator,
+pub struct NaivePeerAuthenticatorFactory {
+    pub peer_auth: PeerAuthenticator,
 }
 
 impl PeerAuthenticatorFactory for NaivePeerAuthenticatorFactory {
@@ -92,7 +90,6 @@ impl Server {
                 return;
             },
         };
-        //let clear_link_priv_key = ClearOnDrop::new(&mut link_priv_key);
         let (tcp_fount_tx, tcp_fount_rx) = unbounded();
         let (crypto_worker_tx, crypto_worker_rx) = unbounded();
 
@@ -102,13 +99,12 @@ impl Server {
             self.incoming_conn_founts.push(fount);
         }
 
-        for _i in 1..self.cfg.server.num_wire_workers {
-
+        for _ in 0..self.cfg.server.num_wire_workers {
             let peer_auth_factory = NaivePeerAuthenticatorFactory {
                 peer_auth: self.peer_auth.clone(),
             };
             let wire_cfg = WireConfig {
-                link_private_key: link_priv_key,
+                link_private_key: link_priv_key.clone(),
                 tcp_fount_rx: tcp_fount_rx.clone(),
                 crypto_worker_tx: crypto_worker_tx.clone(),
             };
