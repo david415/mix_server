@@ -31,7 +31,7 @@ use self::mix_link::messages::{SessionConfig, PeerAuthenticator};
 
 use super::config::Config;
 use super::tcp_listener::TcpStreamFount;
-use super::wire_worker::WireWorker;
+use super::wire_worker::{WireConfig, start_wire_worker, PeerAuthenticatorFactory};
 
 
 fn init_logger(log_dir: &str) {
@@ -50,10 +50,19 @@ fn init_logger(log_dir: &str) {
     let _handle = log4rs::init_config(config).unwrap();
 }
 
+struct NaivePeerAuthenticatorFactory {
+    peer_auth: PeerAuthenticator,
+}
+
+impl PeerAuthenticatorFactory for NaivePeerAuthenticatorFactory {
+    fn build(&self) -> PeerAuthenticator {
+        self.peer_auth.clone()
+    }
+}
+
 pub struct Server {
     cfg: Config,
     incoming_conn_founts: Vec<TcpStreamFount>,
-    wire_workers: Vec<WireWorker>,
     peer_auth: PeerAuthenticator, // XXX
 }
 
@@ -62,7 +71,6 @@ impl Server {
         let s = Server {
             cfg: cfg,
             incoming_conn_founts: vec![],
-            wire_workers: vec![],
             peer_auth: peer_auth,
         };
         init_logger(s.cfg.logging.log_file.as_str());
@@ -85,7 +93,6 @@ impl Server {
             },
         };
         //let clear_link_priv_key = ClearOnDrop::new(&mut link_priv_key);
-
         let (tcp_fount_tx, tcp_fount_rx) = unbounded();
         let (crypto_worker_tx, crypto_worker_rx) = unbounded();
 
@@ -96,9 +103,16 @@ impl Server {
         }
 
         for _i in 1..self.cfg.server.num_wire_workers {
-            let mut wire_worker = WireWorker::new(self.peer_auth.clone(), link_priv_key, tcp_fount_rx.clone(), crypto_worker_tx.clone());
-            wire_worker.run();
-            self.wire_workers.push(wire_worker);
+
+            let peer_auth_factory = NaivePeerAuthenticatorFactory {
+                peer_auth: self.peer_auth.clone(),
+            };
+            let wire_cfg = WireConfig {
+                link_private_key: link_priv_key,
+                tcp_fount_rx: tcp_fount_rx.clone(),
+                crypto_worker_tx: crypto_worker_tx.clone(),
+            };
+            start_wire_worker(wire_cfg, peer_auth_factory);
         }
     }
 }

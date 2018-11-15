@@ -28,124 +28,107 @@ use crossbeam_utils::thread;
 use crossbeam::thread::{ScopedJoinHandle, ScopedThreadBuilder};
 use crossbeam_channel::{Receiver, Sender, unbounded};
 
-use self::mix_link::sync::Session;
-use self::mix_link::errors::HandshakeError;
-use self::mix_link::messages::{SessionConfig, PeerAuthenticator};
-use self::mix_link::commands::Command;
 use ecdh_wrapper::PrivateKey;
+use mix_link::sync::Session;
+use mix_link::errors::HandshakeError;
+use mix_link::messages::{SessionConfig, PeerAuthenticator};
+use mix_link::commands::Command;
 
 use packet::Packet;
 use super::tcp_listener::TcpStreamFount;
 
-#[derive(Clone)]
-pub struct WireWorker {
-    link_private_key: PrivateKey,
-    tcp_fount_rx: Receiver<TcpStream>,
-    reader_tx: Sender<Session>,
-    reader_rx: Receiver<Session>,
-    writer_tx: Sender<Session>,
-    writer_rx: Receiver<Session>,
-    crypto_worker_tx: Sender<Packet>,
-    barrier: Arc<Barrier>,
-    peer_auth: PeerAuthenticator
+
+pub trait PeerAuthenticatorFactory {
+    fn build(&self) -> PeerAuthenticator;
 }
 
-impl WireWorker {
-    pub fn new(peer_auth: PeerAuthenticator, link_private_key: PrivateKey, tcp_fount_rx: Receiver<TcpStream>, crypto_worker_tx: Sender<Packet>) -> WireWorker {
-        let (reader_tx, reader_rx) = unbounded();
-        let (writer_tx, writer_rx) = unbounded();
+#[derive(Clone)]
+pub struct WireConfig {
+    pub link_private_key: PrivateKey,
+    pub tcp_fount_rx: Receiver<TcpStream>,
+    pub crypto_worker_tx: Sender<Packet>,
+}
 
-        WireWorker{
-            link_private_key: link_private_key,
-            tcp_fount_rx: tcp_fount_rx,
-            crypto_worker_tx: crypto_worker_tx,
-            barrier: Arc::new(Barrier::new(3)),
-            peer_auth: peer_auth,
-            reader_tx: reader_tx,
-            reader_rx: reader_rx,
-            writer_tx: writer_tx,
-            writer_rx: writer_rx,
-        }
-    }
+fn create_session(session_config: SessionConfig, stream: TcpStream) -> Result<Session, HandshakeError> {
+    let mut session = Session::new(session_config, false)?;
+    session.initialize(stream)?;
+    session = session.into_transport_mode()?;
+    session.finalize_handshake()?;
+    Ok(session)
+}
 
-    pub fn create_session(&self, session_config: SessionConfig, stream: TcpStream) -> Result<Session, HandshakeError> {
-        let mut session = Session::new(session_config, false)?;
-        session.initialize(stream)?;
-        session = session.into_transport_mode()?;
-        session.finalize_handshake()?;
-        Ok(session)
-    }
-
-    fn get_authenticator(&mut self) -> PeerAuthenticator {
-        self.peer_auth.clone()
-    }
-
-    pub fn stream_dispatcher(&mut self) {
-        loop {
-            if let Ok(stream) = self.tcp_fount_rx.recv() {
-                let authenticator = self.get_authenticator();
-                let session_config = SessionConfig{
-                    authenticator: authenticator,
-                    authentication_key: self.link_private_key,
-                    peer_public_key: None,
-                    additional_data: vec![],
-                };
-                let session = match self.create_session(session_config, stream) {
-                    Ok(x) => x,
-                    Err(e) => {
-                        error!("session creation failure: {}", e);
-                        self.halt();
-                        return
-                    }
-                };
-                let session_writer = session.clone();
-                if let Err(e) = self.reader_tx.send(session) {
-                    warn!("shutting down wire worker because of a failure to dispatch session to reader thread: {}", e);
-                    self.halt();
-                    return
-                }
-                if let Err(e) = self.writer_tx.send(session_writer) {
-                    warn!("shutting down wire worker because of a failure to dispatch session to writer thread: {}", e);
-                    self.halt();
-                    return
-                }
-                let barrier = self.barrier.clone();
-                barrier.wait();
-            } else {
-                warn!("fount chan recv failure, halting wire worker.");
-                self.halt();
+fn session_dispatcher<T: PeerAuthenticatorFactory + Send>(reader_tx: Sender<Session>, barrier: Arc<Barrier>, cfg: WireConfig, peer_auth_factory: T) {
+    loop {
+        barrier.wait();
+        if let Ok(stream) = cfg.tcp_fount_rx.recv() {
+            let session_config = SessionConfig{
+                authenticator: peer_auth_factory.build(),
+                authentication_key: cfg.link_private_key,
+                peer_public_key: None,
+                additional_data: vec![],
+            };
+            let session = match create_session(session_config, stream) {
+                Ok(x) => x,
+                Err(e) => {
+                    warn!("failed to create noise session: {}", e);
+                    continue
+                },
+            };
+            if let Err(e) = reader_tx.send(session) {
+                warn!("shutting down wire worker because of a failure to dispatch session to reader thread: {}", e);
                 return
             }
+        } else {
+            warn!("fount chan recv failure, halting wire worker.");
+            return
+        }
+    } // end of loop {
+}
+
+fn reader(reader_rx: Receiver<Session>, barrier: Arc<Barrier>) {
+    loop {
+        barrier.wait();
+        if let Ok(mut session) = reader_rx.recv() {
+            if let Ok(cmd) = session.recv_command() {
+                println!("server received command {:?}", cmd);
+            } else {
+                session.close();
+            }
+        } else {
+            warn!("failed to recv session on reader_rx");
+            return
         }
     }
+}
 
-    pub fn reader(&mut self) {}
+pub fn start_wire_worker<T: PeerAuthenticatorFactory + Send>(cfg: WireConfig, peer_auth_factory: T) {
+    let barrier = Arc::new(Barrier::new(2));
+    let (reader_tx, reader_rx) = unbounded();
+    let dispatcher_barrier = barrier.clone();
+    let reader_barrier = barrier.clone();
 
-    pub fn writer(&mut self) {}
-
-    pub fn run(&mut self) {
-        if let Err(_) = thread::scope(|scope| {
-            let mut worker = self.clone();
-            let mut reader = self.clone();
-            let mut writer = self.clone();
-            let dispatcher_handle = Some(scope.spawn(move |_| {
-                worker.stream_dispatcher();
-            }));
-            let reader_handle = Some(scope.spawn(move |_| {
-                reader.reader();
-            }));
-            let writer_handle = Some(scope.spawn(move |_| {
-                writer.writer();
-            }));
-
-        }) {
-            warn!("wire worker failed to spawn thread(s)");
-        }
+    if let Err(_) = thread::scope(|scope| {
+        let mut thread_handles = vec![];
+        thread_handles.push(Some(scope.spawn(move |_| {
+            session_dispatcher(reader_tx, dispatcher_barrier, cfg, peer_auth_factory);
+        })));
+        thread_handles.push(Some(scope.spawn(move |_| {
+            reader(reader_rx, reader_barrier);
+        })));
+    }) {
+        warn!("wire worker failed to spawn thread(s)");
+        return
     }
+}
 
-    pub fn halt(&mut self) {
-        // XXX fix me
-        //drop(self.writer_handle.take());
-        //drop(self.reader_handle.take());
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn basic_wire_worker_test() {
+
+
+        //start_wire_worker()
     }
 }
