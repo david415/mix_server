@@ -14,12 +14,12 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-extern crate mix_link;
-extern crate ecdh_wrapper;
 extern crate crossbeam;
 extern crate crossbeam_utils;
 extern crate crossbeam_thread;
 extern crate crossbeam_channel;
+extern crate ecdh_wrapper;
+extern crate mix_link;
 
 use std::sync::{Mutex, Arc, Barrier};
 use std::net::TcpStream;
@@ -59,9 +59,7 @@ fn create_session(session_config: SessionConfig, stream: TcpStream) -> Result<Se
 
 fn session_dispatcher<T: PeerAuthenticatorFactory + Send>(reader_tx: Sender<Session>, barrier: Arc<Barrier>, cfg: WireConfig, peer_auth_factory: T) {
     loop {
-        println!("dispatcher before barrier");
         barrier.wait();
-        println!("dispatcher after barrier");
         if let Ok(stream) = cfg.tcp_fount_rx.recv() {
             let session_config = SessionConfig{
                 authenticator: peer_auth_factory.build(),
@@ -89,9 +87,7 @@ fn session_dispatcher<T: PeerAuthenticatorFactory + Send>(reader_tx: Sender<Sess
 
 fn reader(reader_rx: Receiver<Session>, barrier: Arc<Barrier>) {
     loop {
-        println!("reader before barrier");
         barrier.wait();
-        println!("reader after barrier");
         if let Ok(mut session) = reader_rx.recv() {
             if let Ok(cmd) = session.recv_command() {
                 println!("server received command {:?}", cmd);
@@ -115,7 +111,6 @@ pub fn start_wire_worker_runner<T: PeerAuthenticatorFactory + Send>(cfg: WireCon
     let dispatcher_barrier = barrier.clone();
     let reader_barrier = barrier.clone();
 
-    println!("yo1");
     if let Err(_) = thread::scope(|scope| {
         let mut thread_handles = vec![];
         thread_handles.push(Some(scope.spawn(move |_| {
@@ -128,15 +123,14 @@ pub fn start_wire_worker_runner<T: PeerAuthenticatorFactory + Send>(cfg: WireCon
         warn!("wire worker failed to spawn thread(s)");
         return
     }
-    println!("yo2");
 }
 
 
 #[cfg(test)]
 mod tests {
+    extern crate rand;
     extern crate ecdh_wrapper;
     extern crate mix_link;
-    extern crate rand;
 
     use std::collections::HashMap;
     use self::rand::os::OsRng;
@@ -167,8 +161,6 @@ mod tests {
             tcp_fount_rx: tcp_fount_rx,
             crypto_worker_tx: crypto_worker_tx,
         };
-        println!("before start wire worker");
         start_wire_worker(cfg, peer_auth_factory);
-        println!("after start wire worker");
     }
 }
