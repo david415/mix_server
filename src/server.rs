@@ -29,7 +29,9 @@ use self::mix_link::messages::{SessionConfig, PeerAuthenticator};
 
 use super::config::Config;
 use super::tcp_listener::TcpStreamFount;
-use super::wire_worker::{WireConfig, start_wire_worker, PeerAuthenticatorFactory};
+use super::wire_worker::{WireConfig, start_wire_worker,
+                         PeerAuthenticatorFactory,
+                         StaticAuthenticatorFactory};
 
 
 fn init_logger(log_dir: &str) {
@@ -46,16 +48,6 @@ fn init_logger(log_dir: &str) {
         .build(Root::builder().appender("mixnet_server").build(LevelFilter::Info)) // XXX
         .unwrap();
     let _handle = log4rs::init_config(config).unwrap();
-}
-
-pub struct NaivePeerAuthenticatorFactory {
-    pub peer_auth: PeerAuthenticator,
-}
-
-impl PeerAuthenticatorFactory for NaivePeerAuthenticatorFactory {
-    fn build(&self) -> PeerAuthenticator {
-        self.peer_auth.clone()
-    }
 }
 
 pub struct Server {
@@ -100,15 +92,17 @@ impl Server {
         }
 
         for _ in 0..self.cfg.server.num_wire_workers {
-            let peer_auth_factory = NaivePeerAuthenticatorFactory {
-                peer_auth: self.peer_auth.clone(),
+            let static_auth_factory = StaticAuthenticatorFactory {
+                auth: self.peer_auth.clone(),
             };
+            let factory = PeerAuthenticatorFactory::Static(static_auth_factory);
+
             let wire_cfg = WireConfig {
                 link_private_key: link_priv_key.clone(),
                 tcp_fount_rx: tcp_fount_rx.clone(),
                 crypto_worker_tx: crypto_worker_tx.clone(),
             };
-            start_wire_worker(wire_cfg, peer_auth_factory);
+            start_wire_worker(wire_cfg, factory);
         }
     }
 }

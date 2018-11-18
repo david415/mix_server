@@ -23,6 +23,7 @@ extern crate mix_link;
 
 use std::sync::{Mutex, Arc, Barrier};
 use std::net::TcpStream;
+use std::thread as std_thread;
 
 use crossbeam_utils::thread;
 use crossbeam::thread::{ScopedJoinHandle, ScopedThreadBuilder};
@@ -38,9 +39,24 @@ use packet::Packet;
 use super::tcp_listener::TcpStreamFount;
 
 
-pub trait PeerAuthenticatorFactory {
-    fn build(&self) -> PeerAuthenticator;
+pub struct StaticAuthenticatorFactory {
+    pub auth: PeerAuthenticator,
 }
+
+pub enum PeerAuthenticatorFactory {
+    Static(StaticAuthenticatorFactory),
+}
+
+impl PeerAuthenticatorFactory {
+    fn build(&self) -> PeerAuthenticator {
+        match *self {
+            PeerAuthenticatorFactory::Static(ref factory) => {
+                factory.auth.clone()
+            },
+        }
+    }
+}
+
 
 #[derive(Clone)]
 pub struct WireConfig {
@@ -57,7 +73,7 @@ fn create_session(session_config: SessionConfig, stream: TcpStream) -> Result<Se
     Ok(session)
 }
 
-fn session_dispatcher<T: PeerAuthenticatorFactory + Send>(reader_tx: Sender<Session>, barrier: Arc<Barrier>, cfg: WireConfig, peer_auth_factory: T) {
+fn session_dispatcher(reader_tx: Sender<Session>, barrier: Arc<Barrier>, cfg: WireConfig, peer_auth_factory: PeerAuthenticatorFactory) {
     loop {
         barrier.wait();
         if let Ok(stream) = cfg.tcp_fount_rx.recv() {
@@ -90,7 +106,7 @@ fn reader(reader_rx: Receiver<Session>, barrier: Arc<Barrier>) {
         barrier.wait();
         if let Ok(mut session) = reader_rx.recv() {
             if let Ok(cmd) = session.recv_command() {
-                println!("server received command {:?}", cmd);
+                debug!("server received command {:?}", cmd);
             } else {
                 session.close();
             }
@@ -101,11 +117,13 @@ fn reader(reader_rx: Receiver<Session>, barrier: Arc<Barrier>) {
     }
 }
 
-pub fn start_wire_worker<T: PeerAuthenticatorFactory + Send>(cfg: WireConfig, peer_auth_factory: T) {
-    start_wire_worker_runner(cfg, peer_auth_factory);
+pub fn start_wire_worker(cfg: WireConfig, peer_auth_factory: PeerAuthenticatorFactory) {
+    std_thread::spawn(move || {
+        start_wire_worker_runner(cfg, peer_auth_factory);
+    });
 }
 
-pub fn start_wire_worker_runner<T: PeerAuthenticatorFactory + Send>(cfg: WireConfig, peer_auth_factory: T) {
+pub fn start_wire_worker_runner(cfg: WireConfig, peer_auth_factory: PeerAuthenticatorFactory) {
     let barrier = Arc::new(Barrier::new(2));
     let (reader_tx, reader_rx) = unbounded();
     let dispatcher_barrier = barrier.clone();
@@ -133,11 +151,13 @@ mod tests {
     extern crate mix_link;
 
     use std::collections::HashMap;
+    use std::net::{TcpListener, TcpStream};
+    use std::thread as std_thread;
     use self::rand::os::OsRng;
     use ecdh_wrapper::{PrivateKey, PublicKey};
-    use mix_link::messages::{SessionConfig, PeerAuthenticator, ServerAuthenticatorState};
+    use mix_link::messages::{SessionConfig, PeerAuthenticator, ServerAuthenticatorState,
+                             ClientAuthenticatorState};
 
-    use super::super::server::{NaivePeerAuthenticatorFactory};
     use super::super::wire_worker::{start_wire_worker};
     use super::*;
 
@@ -145,15 +165,25 @@ mod tests {
     fn basic_wire_worker_test() {
         let mut rng = OsRng::new().unwrap();
         let mix_priv_key = PrivateKey::generate(&mut rng).unwrap();
+        let mix_pub_key = mix_priv_key.public_key().clone();
         let upstream_mix_priv_key = PrivateKey::generate(&mut rng).unwrap();
+        let upstream_mix_pub_key = upstream_mix_priv_key.clone();
+
+        let mut upstream_server_auth = ServerAuthenticatorState::default();
+        upstream_server_auth.mix_map = HashMap::new();
+        upstream_server_auth.mix_map.entry(mix_pub_key).or_insert(true);
+        let upstream_auth = PeerAuthenticator::Server(upstream_server_auth);
+
         let mut mix_map: HashMap<PublicKey, bool> = HashMap::new();
         mix_map.insert(upstream_mix_priv_key.public_key(), true);
         let peer_auth = PeerAuthenticator::Server(ServerAuthenticatorState{
             mix_map: mix_map,
         });
-        let peer_auth_factory = NaivePeerAuthenticatorFactory{
-            peer_auth: peer_auth,
+        let static_auth_factory = StaticAuthenticatorFactory {
+            auth: peer_auth.clone(),
         };
+        let factory = PeerAuthenticatorFactory::Static(static_auth_factory);
+
         let (tcp_fount_tx, tcp_fount_rx) = unbounded();
         let (crypto_worker_tx, crypto_worker_rx) = unbounded();
         let cfg = WireConfig {
@@ -161,6 +191,42 @@ mod tests {
             tcp_fount_rx: tcp_fount_rx,
             crypto_worker_tx: crypto_worker_tx,
         };
-        start_wire_worker(cfg, peer_auth_factory);
+        start_wire_worker(cfg, factory);
+
+        let mix_addr = String::from("127.0.0.1:34578");
+        let listener = TcpListener::bind(mix_addr.clone()).unwrap();
+        let job_handle = Some(std_thread::spawn(move || {
+            for maybe_stream in listener.incoming() {
+                match maybe_stream {
+                    Ok(stream) => {
+                        tcp_fount_tx.send(stream).unwrap();
+                    }
+                    Err(_) => {
+                        return;
+                    }
+                }
+            }
+        }));
+
+        // client
+        let client_config = SessionConfig {
+            authenticator: upstream_auth,
+            authentication_key: upstream_mix_priv_key,
+            peer_public_key: Some(mix_pub_key),
+            additional_data: vec![],
+        };
+        let mut session = Session::new(client_config, true).unwrap();
+
+        let stream = TcpStream::connect(mix_addr.clone()).expect("connection failed");
+        session.initialize(stream).unwrap();
+        session = session.into_transport_mode().unwrap();
+        session.finalize_handshake().unwrap();
+        println!("client handshake completed!");
+
+        //thread::sleep(Duration::from_secs(1));
+        let cmd = Command::NoOp{};
+        session.send_command(&cmd).unwrap();
+        session.send_command(&cmd).unwrap();
+        session.send_command(&cmd).unwrap();
     }
 }
