@@ -16,9 +16,13 @@
 
 //! Mix server error types.
 
+use std::io::Error as IoError;
 use std::error::Error;
 use std::fmt;
 use toml;
+
+use ecdh_wrapper::errors::KeyError;
+
 
 #[derive(Debug)]
 pub enum ConfigError {
@@ -59,5 +63,53 @@ impl From<std::io::Error> for ConfigError {
 impl From<toml::de::Error> for ConfigError {
     fn from(error: toml::de::Error) -> Self {
         ConfigError::TomlError(error)
+    }
+}
+
+#[derive(Debug)]
+pub enum MixKeyError {
+    CreateCacheFailed,
+    LoadCacheFailed,
+    KeyError(KeyError),
+    IoError(IoError),
+}
+
+impl fmt::Display for MixKeyError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use self::MixKeyError::*;
+        match self {
+            CreateCacheFailed => write!(f, "Failed to create cache."),
+            LoadCacheFailed => write!(f, "Failed to load cache."),
+            KeyError(x) => x.fmt(f),
+            IoError(x) => x.fmt(f),
+        }
+    }
+}
+
+impl Error for MixKeyError {
+    fn description(&self) -> &str {
+        "I'm a MixKeyError."
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        use self::MixKeyError::*;
+        match self {
+            CreateCacheFailed => None,
+            LoadCacheFailed => None,
+            KeyError(x) => x.cause(),
+            IoError(x) => x.cause(),
+        }
+    }
+}
+
+impl From<KeyError> for MixKeyError {
+    fn from(error: KeyError) -> Self {
+        MixKeyError::KeyError(error)
+    }
+}
+
+impl From<IoError> for MixKeyError {
+    fn from(error: IoError) -> Self {
+        MixKeyError::IoError(error)
     }
 }

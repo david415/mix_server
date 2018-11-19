@@ -14,16 +14,22 @@ serde = "1.0.80"
 log = "0.4.3"
 log4rs = "0.8.0"
 ecdh_wrapper = "0.0.7"
-sphinxcrypto = "0.0.13"
+#sphinxcrypto = "0.0.13"
+sphinxcrypto = { path = "../rust-sphinxcrypto" }
 mix_link = { path = "../mix_link" }
 crossbeam = "0.5.0"
 crossbeam-thread = "0.0.0"
 crossbeam-channel = "0.3.0"
 crossbeam-utils = "0.6.1"
+bloom = "0.3.2"
+sled = "0.16.2"
+rand = "^0.4.2"
+byteorder = "1.2.6"
 
 [dev-dependencies]
 rustc-serialize = "0.3.24"
 rand = "^0.4.2"
+tempfile = "3.0.4"
 
 [[bin]]
 name = "server"

@@ -36,30 +36,32 @@ pub struct Server {
     pub is_provider: bool,
     pub num_wire_workers: u16,
     pub num_sphinx_workers: u16,
+    pub num_crypto_workers: u16,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Nonvoting {
-    address: String,
-    public_key: String,
+    pub address: String,
+    pub public_key: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Peer {
-    addresses: Vec<String>,
-    identity_public_key: String,
-    link_public_key: String,
+    pub addresses: Vec<String>,
+    pub identity_public_key: String,
+    pub link_public_key: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Voting {
-    peers: Vec<Peer>,
+    pub epoch_duration: u64,
+    pub peers: Vec<Peer>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Pki {
-    nonvoting: Option<Nonvoting>,
-    voting: Option<Voting>,
+    pub nonvoting: Option<Nonvoting>,
+    pub voting: Option<Voting>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

@@ -32,6 +32,7 @@ use super::tcp_listener::TcpStreamFount;
 use super::wire_worker::{WireConfig, start_wire_worker,
                          PeerAuthenticatorFactory,
                          StaticAuthenticatorFactory};
+use super::crypto_worker::start_crypto_worker;
 
 
 fn init_logger(log_dir: &str) {
@@ -90,7 +91,6 @@ impl Server {
             fount.run();
             self.incoming_conn_founts.push(fount);
         }
-
         for _ in 0..self.cfg.server.num_wire_workers {
             let static_auth_factory = StaticAuthenticatorFactory {
                 auth: self.peer_auth.clone(),
@@ -103,6 +103,9 @@ impl Server {
                 crypto_worker_tx: crypto_worker_tx.clone(),
             };
             start_wire_worker(wire_cfg, factory);
+        }
+        for _ in 0..self.cfg.server.num_crypto_workers {
+            start_crypto_worker(crypto_worker_rx.clone());
         }
     }
 }

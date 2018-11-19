@@ -150,6 +150,8 @@ mod tests {
     extern crate ecdh_wrapper;
     extern crate mix_link;
 
+    use std::{thread, time};
+    use std::time::Duration;
     use std::collections::HashMap;
     use std::net::{TcpListener, TcpStream};
     use std::thread as std_thread;
@@ -223,7 +225,7 @@ mod tests {
         session.finalize_handshake().unwrap();
         println!("client handshake completed!");
 
-        //thread::sleep(Duration::from_secs(1));
+        thread::sleep(Duration::from_secs(1));
         let cmd = Command::NoOp{};
         session.send_command(&cmd).unwrap();
         session.send_command(&cmd).unwrap();
