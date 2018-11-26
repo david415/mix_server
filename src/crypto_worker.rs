@@ -14,31 +14,78 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+
 extern crate crossbeam_channel;
+extern crate sphinx_replay_cache;
 
 use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use packet::Packet;
-use crossbeam_channel::Receiver;
+use crossbeam_channel::{Receiver, Select};
+use sphinx_replay_cache::MixKeys;
 
 
-pub fn start_crypto_worker(crypto_worker_rx: Receiver<Packet>) {
+pub struct CryptoWorkerConfig {
+    pub crypto_worker_rx: Receiver<Packet>,
+    pub update_rx: Receiver<bool>,
+    pub halt_rx: Receiver<bool>,
+    pub slack_time: u64,
+}
+
+pub fn start_crypto_worker(cfg: CryptoWorkerConfig) {
     thread::spawn(move || {
-        crypto_worker(crypto_worker_rx)
+        crypto_worker(cfg)
     });
 }
 
-fn crypto_worker(crypto_worker_rx: Receiver<Packet>) {
+fn crypto_worker(cfg: CryptoWorkerConfig) {
+    let mut sel = Select::new();
+    let oper1 = sel.recv(&cfg.crypto_worker_rx);
+    let oper2 = sel.recv(&cfg.update_rx);
+    let oper3 = sel.recv(&cfg.halt_rx);
     loop {
-        let packet = match crypto_worker_rx.recv() {
+        let mut packet = Packet::default();
+        let oper = sel.select();
+        match oper.index() {
+            i if i == oper1 => {
+                packet = match oper.recv(&cfg.crypto_worker_rx) {
+                    Ok(x) => x,
+                    Err(e) => {
+                        warn!("crypto worker failed to receive packet: {}", e);
+                        return
+                    },
+                };
+
+            },
+            i if i == oper2 => {
+                oper.recv(&cfg.update_rx);
+                // XXX not yet implemented
+                continue
+            },
+            i if i == oper3 => {
+                oper.recv(&cfg.halt_rx);
+                return
+            },
+            _ => unreachable!(),
+        }
+
+        // Drop the packet if it has been sitting in the queue waiting to
+	// be decrypted for way too long.
+        let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
             Ok(x) => x,
             Err(e) => {
-                warn!("crypto worker aborting because read channel error: {}", e);
+                warn!("crypto worker failed to read time from clock: {}", e);
                 return
             },
         };
-        // packet.raw
-        // sphinx_packet_unwrap
-        // pub fn sphinx_packet_unwrap(private_key: &PrivateKey, packet: &mut [u8; PACKET_SIZE]) -> (Option<Vec<u8>>, Option<[u8; HASH_SIZE]>, Option<Vec<RoutingCommand>>, Option<SphinxUnwrapError>) {
+        let dwell_time = now - Duration::from_millis(packet.receive_time);
+        if dwell_time > Duration::from_millis(cfg.slack_time) {
+            debug!("dropping packet, dwelled too long.");
+            continue
+        } else {
+            debug!("crypto worker packet queue delay {:?}", dwell_time);
+        }
 
+        // XXX ...
     }
 }

@@ -14,13 +14,16 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+#![feature(mpsc_select)]
+
 #[macro_use]
 extern crate serde_derive;
 extern crate serde;
 extern crate crossbeam;
 extern crate crossbeam_utils;
-extern crate crossbeam_thread;
 extern crate crossbeam_channel;
+extern crate crossbeam_thread;
+extern crate atomic_counter;
 
 #[macro_use]
 extern crate log;
@@ -32,6 +35,7 @@ extern crate sled;
 extern crate ecdh_wrapper;
 extern crate mix_link;
 extern crate sphinxcrypto;
+extern crate sphinx_replay_cache;
 
 pub mod server;
 pub mod config;
@@ -39,5 +43,4 @@ pub mod errors;
 pub mod packet;
 pub mod tcp_listener;
 pub mod wire_worker;
-pub mod mix_key;
 pub mod crypto_worker;

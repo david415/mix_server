@@ -16,8 +16,8 @@
 
 extern crate crossbeam;
 extern crate crossbeam_utils;
-extern crate crossbeam_thread;
 extern crate crossbeam_channel;
+extern crate crossbeam_thread;
 extern crate ecdh_wrapper;
 extern crate mix_link;
 
@@ -26,8 +26,8 @@ use std::net::TcpStream;
 use std::thread as std_thread;
 
 use crossbeam_utils::thread;
-use crossbeam::thread::{ScopedJoinHandle, ScopedThreadBuilder};
 use crossbeam_channel::{Receiver, Sender, unbounded};
+use crossbeam::thread::{ScopedJoinHandle, ScopedThreadBuilder};
 
 use ecdh_wrapper::PrivateKey;
 use mix_link::sync::Session;
@@ -38,11 +38,12 @@ use mix_link::commands::Command;
 use packet::Packet;
 use super::tcp_listener::TcpStreamFount;
 
-
+#[derive(PartialEq, Debug, Clone)]
 pub struct StaticAuthenticatorFactory {
     pub auth: PeerAuthenticator,
 }
 
+#[derive(PartialEq, Debug, Clone)]
 pub enum PeerAuthenticatorFactory {
     Static(StaticAuthenticatorFactory),
 }
@@ -63,6 +64,7 @@ pub struct WireConfig {
     pub link_private_key: PrivateKey,
     pub tcp_fount_rx: Receiver<TcpStream>,
     pub crypto_worker_tx: Sender<Packet>,
+    pub peer_auth_factory: PeerAuthenticatorFactory,
 }
 
 fn create_session(session_config: SessionConfig, stream: TcpStream) -> Result<Session, HandshakeError> {
@@ -73,12 +75,12 @@ fn create_session(session_config: SessionConfig, stream: TcpStream) -> Result<Se
     Ok(session)
 }
 
-fn session_dispatcher(reader_tx: Sender<Session>, barrier: Arc<Barrier>, cfg: WireConfig, peer_auth_factory: PeerAuthenticatorFactory) {
+fn session_dispatcher(reader_tx: Sender<Session>, barrier: Arc<Barrier>, cfg: WireConfig) {
     loop {
         barrier.wait();
         if let Ok(stream) = cfg.tcp_fount_rx.recv() {
             let session_config = SessionConfig{
-                authenticator: peer_auth_factory.build(),
+                authenticator: cfg.peer_auth_factory.build(),
                 authentication_key: cfg.link_private_key.clone(),
                 peer_public_key: None,
                 additional_data: vec![],
@@ -101,41 +103,70 @@ fn session_dispatcher(reader_tx: Sender<Session>, barrier: Arc<Barrier>, cfg: Wi
     } // end of loop {
 }
 
-fn reader(reader_rx: Receiver<Session>, barrier: Arc<Barrier>) {
+fn reader(reader_rx: Receiver<Session>, crypto_worker_tx: Sender<Packet>, barrier: Arc<Barrier>) {
     loop {
         barrier.wait();
-        if let Ok(mut session) = reader_rx.recv() {
-            if let Ok(cmd) = session.recv_command() {
-                debug!("server received command {:?}", cmd);
-            } else {
-                session.close();
+        let mut session = match reader_rx.recv() {
+            Ok(x) => x,
+            Err(e) => {
+                warn!("failed to recv session on reader_rx: {}", e);
+                return
+            },
+        };
+
+        loop {
+            let cmd = match session.recv_command() {
+                Ok(x) => x,
+                Err(_) => {
+                    session.close();
+                    break
+                },
+            };
+            debug!("server received command {:?}", cmd);
+
+            match cmd {
+                Command::NoOp{} => {
+                    debug!("NoOp received!");
+                },
+                Command::SendPacket {
+                    sphinx_packet
+                } => {
+                    let packet = Packet::new(sphinx_packet);
+                    // XXX fixme: use select statement instead of single channel usage
+                    if let Err(e) = crypto_worker_tx.send(packet) {
+                        warn!("failed to send to crypto worker channel: {}", e);
+                        return
+                    }
+                },
+                _ => {
+                    debug!("received unhandled command");
+                    continue
+                }
             }
-        } else {
-            warn!("failed to recv session on reader_rx");
-            return
         }
     }
 }
 
-pub fn start_wire_worker(cfg: WireConfig, peer_auth_factory: PeerAuthenticatorFactory) {
+pub fn start_wire_worker(cfg: WireConfig) {
     std_thread::spawn(move || {
-        start_wire_worker_runner(cfg, peer_auth_factory);
+        start_wire_worker_runner(cfg);
     });
 }
 
-pub fn start_wire_worker_runner(cfg: WireConfig, peer_auth_factory: PeerAuthenticatorFactory) {
+pub fn start_wire_worker_runner(cfg: WireConfig) {
     let barrier = Arc::new(Barrier::new(2));
     let (reader_tx, reader_rx) = unbounded();
     let dispatcher_barrier = barrier.clone();
     let reader_barrier = barrier.clone();
+    let crypto_worker_tx = cfg.crypto_worker_tx.clone();
 
     if let Err(_) = thread::scope(|scope| {
         let mut thread_handles = vec![];
         thread_handles.push(Some(scope.spawn(move |_| {
-            session_dispatcher(reader_tx, dispatcher_barrier, cfg, peer_auth_factory);
+            session_dispatcher(reader_tx, dispatcher_barrier, cfg);
         })));
         thread_handles.push(Some(scope.spawn(move |_| {
-            reader(reader_rx, reader_barrier);
+            reader(reader_rx, crypto_worker_tx, reader_barrier);
         })));
     }) {
         warn!("wire worker failed to spawn thread(s)");
@@ -192,8 +223,9 @@ mod tests {
             link_private_key: mix_priv_key,
             tcp_fount_rx: tcp_fount_rx,
             crypto_worker_tx: crypto_worker_tx,
+            peer_auth_factory: factory,
         };
-        start_wire_worker(cfg, factory);
+        start_wire_worker(cfg);
 
         let mix_addr = String::from("127.0.0.1:34578");
         let listener = TcpListener::bind(mix_addr.clone()).unwrap();

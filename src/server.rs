@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+extern crate atomic_counter;
 extern crate crossbeam_channel;
 extern crate ecdh_wrapper;
 extern crate mix_link;
@@ -32,7 +33,7 @@ use super::tcp_listener::TcpStreamFount;
 use super::wire_worker::{WireConfig, start_wire_worker,
                          PeerAuthenticatorFactory,
                          StaticAuthenticatorFactory};
-use super::crypto_worker::start_crypto_worker;
+use super::crypto_worker::{start_crypto_worker, CryptoWorkerConfig};
 
 
 fn init_logger(log_dir: &str) {
@@ -85,6 +86,8 @@ impl Server {
         };
         let (tcp_fount_tx, tcp_fount_rx) = unbounded();
         let (crypto_worker_tx, crypto_worker_rx) = unbounded();
+        let (pki_update_tx, pki_update_rx) = unbounded();
+        let (halt_tx, halt_rx) = unbounded();
 
         for address in self.cfg.server.addresses.clone() {
             let mut fount = TcpStreamFount::new(address, tcp_fount_tx.clone());
@@ -101,11 +104,18 @@ impl Server {
                 link_private_key: link_priv_key.clone(),
                 tcp_fount_rx: tcp_fount_rx.clone(),
                 crypto_worker_tx: crypto_worker_tx.clone(),
+                peer_auth_factory: factory,
             };
-            start_wire_worker(wire_cfg, factory);
+            start_wire_worker(wire_cfg);
         }
         for _ in 0..self.cfg.server.num_crypto_workers {
-            start_crypto_worker(crypto_worker_rx.clone());
+            let cfg = CryptoWorkerConfig {
+                crypto_worker_rx: crypto_worker_rx.clone(),
+                update_rx: pki_update_rx.clone(),
+                halt_rx: halt_rx.clone(),
+                slack_time: self.cfg.server.crypto_worker_slack_time,
+            };
+            start_crypto_worker(cfg);
         }
     }
 }
