@@ -21,15 +21,13 @@ extern crate epoch;
 extern crate sphinx_replay_cache;
 
 use std::path::Path;
-use std::sync::{Arc, Mutex};
-
 use log4rs::encode::pattern::PatternEncoder;
 use log::LevelFilter;
 use crossbeam_channel::unbounded;
 
 use ecdh_wrapper::PrivateKey;
 use epoch::Clock;
-use self::mix_link::messages::{SessionConfig, PeerAuthenticator};
+use self::mix_link::messages::PeerAuthenticator;
 use sphinx_replay_cache::MixKeys;
 
 use super::constants;
@@ -91,7 +89,7 @@ impl Server {
         };
 
         let clock = Clock::new_katzenpost();
-        let mut mix_keys = match MixKeys::new(clock.clone(),
+        let mix_keys = match MixKeys::new(clock.clone(),
                                               constants::NUM_MIX_KEYS,
                                               self.cfg.server.data_dir.clone(),
                                               self.cfg.server.line_rate) {
@@ -103,8 +101,8 @@ impl Server {
         };
         let (tcp_fount_tx, tcp_fount_rx) = unbounded();
         let (crypto_worker_tx, crypto_worker_rx) = unbounded();
-        let (pki_update_tx, pki_update_rx) = unbounded();
-        let (halt_tx, halt_rx) = unbounded();
+        let (pki_update_tx, pki_update_rx) = unbounded(); // XXX
+        let (halt_tx, halt_rx) = unbounded(); // XXX
 
 
         for address in self.cfg.server.addresses.clone() {

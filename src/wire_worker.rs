@@ -21,13 +21,12 @@ extern crate crossbeam_thread;
 extern crate ecdh_wrapper;
 extern crate mix_link;
 
-use std::sync::{Mutex, Arc, Barrier};
+use std::sync::{Arc, Barrier};
 use std::net::TcpStream;
 use std::thread as std_thread;
 
 use crossbeam_utils::thread;
 use crossbeam_channel::{Receiver, Sender, unbounded};
-use crossbeam::thread::{ScopedJoinHandle, ScopedThreadBuilder};
 
 use ecdh_wrapper::PrivateKey;
 use mix_link::sync::Session;
@@ -36,7 +35,6 @@ use mix_link::messages::{SessionConfig, PeerAuthenticator};
 use mix_link::commands::Command;
 
 use packet::Packet;
-use super::tcp_listener::TcpStreamFount;
 
 #[derive(PartialEq, Debug, Clone)]
 pub struct StaticAuthenticatorFactory {
@@ -134,7 +132,7 @@ fn reader(reader_rx: Receiver<Session>, crypto_worker_tx: Sender<Packet>, barrie
                     let packet = match Packet::new(sphinx_packet) {
                         Ok(x) => x,
                         Err(e) => {
-                            warn!("invalid sphinx packet");
+                            warn!("invalid sphinx packet: {}", e);
                             continue
                         },
                     };
@@ -194,8 +192,7 @@ mod tests {
     use std::thread as std_thread;
     use self::rand::os::OsRng;
     use ecdh_wrapper::{PrivateKey, PublicKey};
-    use mix_link::messages::{SessionConfig, PeerAuthenticator, ServerAuthenticatorState,
-                             ClientAuthenticatorState};
+    use mix_link::messages::{SessionConfig, PeerAuthenticator, ServerAuthenticatorState};
 
     use super::super::wire_worker::{start_wire_worker};
     use super::*;

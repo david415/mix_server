@@ -16,7 +16,6 @@
 
 use std::thread;
 use std::thread::JoinHandle;
-use std::sync::{Mutex, Arc};
 use std::net::{TcpListener, TcpStream};
 
 use crossbeam_channel::Sender;

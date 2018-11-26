@@ -21,12 +21,10 @@ extern crate ecdh_wrapper;
 extern crate sphinx_replay_cache;
 extern crate sphinxcrypto;
 
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::collections::HashMap;
 
-use ecdh_wrapper::PrivateKey;
 use epoch::Clock;
 use crossbeam_channel::{Receiver, Select};
 use sphinx_replay_cache::{MixKeys, MixKey, Tag};
@@ -55,7 +53,6 @@ pub fn start_crypto_worker(cfg: CryptoWorkerConfig) {
 fn unwrap_packet(packet: &mut Packet, clock: &Clock, shadow_mix_keys: &mut HashMap<u64, MixKey>) -> Result<(),UnwrapPacketError>{
     // Figure out the candidate mix private keys for this packet.
     let time = clock.now();
-    let mut keys: Vec<&mut MixKey> = vec![];
     let mut epochs: Vec<u64> = vec![];
 
     if !shadow_mix_keys.contains_key(&time.epoch) {
@@ -96,7 +93,7 @@ fn unwrap_packet(packet: &mut Packet, clock: &Clock, shadow_mix_keys: &mut HashM
         }
 
         // XXX
-        //packet.set_payload(final_payload);
+        packet.set_payload(final_payload);
         //packet.set_cmds(cmds); // XXX
     }
     Ok(())
@@ -123,13 +120,16 @@ fn crypto_worker(cfg: CryptoWorkerConfig) {
                 };
             },
             i if i == oper2 => {
-                oper.recv(&cfg.update_rx);
+                if let Err(e) = oper.recv(&cfg.update_rx) {
+                    warn!("failed to receive on update chan: {}", e);
+                    return
+                }
                 let mut mix_keys = cfg.mix_keys.clone();
                 mix_keys.shadow(&mut shadow_mix_keys);
                 continue
             },
             i if i == oper3 => {
-                oper.recv(&cfg.halt_rx);
+                oper.recv(&cfg.halt_rx).unwrap();
                 return
             },
             _ => unreachable!(),

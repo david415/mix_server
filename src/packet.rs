@@ -16,7 +16,7 @@
 
 extern crate sphinxcrypto;
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::default::Default;
 use sphinxcrypto::constants::PACKET_SIZE;
 use super::errors::PacketError;
@@ -26,6 +26,7 @@ pub struct Packet {
     pub id: u64,
     pub raw: Box<[u8; PACKET_SIZE]>,
     pub receive_time: u64,
+    pub payload: Option<Vec<u8>>,
 }
 
 impl Default for Packet {
@@ -34,6 +35,7 @@ impl Default for Packet {
             id: 0,
             raw: Box::new([0u8; PACKET_SIZE]),
             receive_time: 0,
+            payload: None,
         }
     }
 }
@@ -57,6 +59,11 @@ impl Packet {
             id: 0, // XXX - FIX ME
             raw: payload,
             receive_time: in_ms,
+            payload: None,
         })
+    }
+
+    pub fn set_payload(&mut self, payload: Option<Vec<u8>>) {
+        self.payload = payload;
     }
 }
