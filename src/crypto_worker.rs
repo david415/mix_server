@@ -92,7 +92,6 @@ fn unwrap_packet(packet: &mut Packet, clock: &Clock, shadow_mix_keys: &mut HashM
             }
         }
 
-        // XXX
         packet.set_payload(final_payload);
         //packet.set_cmds(cmds); // XXX
     }
