@@ -14,18 +14,37 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+extern crate sphinxcrypto;
+
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::default::Default;
+use sphinxcrypto::constants::PACKET_SIZE;
+use super::errors::PacketError;
 
 
-#[derive(Default)]
 pub struct Packet {
     pub id: u64,
-    pub raw: Vec<u8>,
+    pub raw: Box<[u8; PACKET_SIZE]>,
     pub receive_time: u64,
 }
 
+impl Default for Packet {
+    fn default() -> Packet {
+        Packet {
+            id: 0,
+            raw: Box::new([0u8; PACKET_SIZE]),
+            receive_time: 0,
+        }
+    }
+}
+
 impl Packet {
-    pub fn new(raw: Vec<u8>) -> Self {
+    pub fn new(raw: Vec<u8>) -> Result<Self, PacketError> {
+        if raw.len() != PACKET_SIZE {
+            return Err(PacketError::WrongSize)
+        }
+        let mut payload = Box::new([0u8; PACKET_SIZE]);
+        payload[..].clone_from_slice(&raw);
         let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
             Ok(x) => x,
             Err(_) => {
@@ -34,10 +53,10 @@ impl Packet {
         };
         let in_ms = now.as_secs() * 1000 +
             now.subsec_nanos() as u64 / 1_000_000;
-        Packet{
+        Ok(Packet{
             id: 0, // XXX - FIX ME
-            raw: raw,
+            raw: payload,
             receive_time: in_ms,
-        }
+        })
     }
 }

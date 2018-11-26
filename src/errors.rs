@@ -113,3 +113,63 @@ impl From<IoError> for MixKeyError {
         MixKeyError::IoError(error)
     }
 }
+
+#[derive(Debug)]
+pub enum UnwrapPacketError {
+    NoKey,
+    CacheFail,
+    Replay,
+}
+
+impl fmt::Display for UnwrapPacketError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use self::UnwrapPacketError::*;
+        match self {
+            NoKey => write!(f, "no mix key found"),
+            CacheFail => write!(f, "cache failure"),
+            Replay => write!(f, "sphinx packet replay detected"),
+        }
+    }
+}
+
+impl Error for UnwrapPacketError {
+    fn description(&self) -> &str {
+        "I'm a unwrap packet error."
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        use self::UnwrapPacketError::*;
+        match self {
+            NoKey => None,
+            CacheFail => None,
+            Replay => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum PacketError {
+    WrongSize,
+}
+
+impl fmt::Display for PacketError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use self::PacketError::*;
+        match self {
+            WrongSize => write!(f, ""),
+        }
+    }
+}
+
+impl Error for PacketError {
+    fn description(&self) -> &str {
+        "I'm a unwrap packet error."
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        use self::PacketError::*;
+        match self {
+            WrongSize => None,
+        }
+    }
+}

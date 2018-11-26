@@ -23,7 +23,7 @@ extern crate crossbeam;
 extern crate crossbeam_utils;
 extern crate crossbeam_channel;
 extern crate crossbeam_thread;
-extern crate atomic_counter;
+extern crate epoch;
 
 #[macro_use]
 extern crate log;
@@ -39,6 +39,7 @@ extern crate sphinx_replay_cache;
 
 pub mod server;
 pub mod config;
+pub mod constants;
 pub mod errors;
 pub mod packet;
 pub mod tcp_listener;

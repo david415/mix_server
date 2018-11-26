@@ -14,20 +14,25 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-extern crate atomic_counter;
 extern crate crossbeam_channel;
 extern crate ecdh_wrapper;
 extern crate mix_link;
-
+extern crate epoch;
+extern crate sphinx_replay_cache;
 
 use std::path::Path;
+use std::sync::{Arc, Mutex};
+
 use log4rs::encode::pattern::PatternEncoder;
 use log::LevelFilter;
 use crossbeam_channel::unbounded;
 
 use ecdh_wrapper::PrivateKey;
+use epoch::Clock;
 use self::mix_link::messages::{SessionConfig, PeerAuthenticator};
+use sphinx_replay_cache::MixKeys;
 
+use super::constants;
 use super::config::Config;
 use super::tcp_listener::TcpStreamFount;
 use super::wire_worker::{WireConfig, start_wire_worker,
@@ -84,10 +89,23 @@ impl Server {
                 return;
             },
         };
+
+        let clock = Clock::new_katzenpost();
+        let mut mix_keys = match MixKeys::new(clock.clone(),
+                                              constants::NUM_MIX_KEYS,
+                                              self.cfg.server.data_dir.clone(),
+                                              self.cfg.server.line_rate) {
+            Ok(x) => x,
+            Err(e) => {
+                error!("failed to load or generate mix keys: {}", e);
+                return;
+            },
+        };
         let (tcp_fount_tx, tcp_fount_rx) = unbounded();
         let (crypto_worker_tx, crypto_worker_rx) = unbounded();
         let (pki_update_tx, pki_update_rx) = unbounded();
         let (halt_tx, halt_rx) = unbounded();
+
 
         for address in self.cfg.server.addresses.clone() {
             let mut fount = TcpStreamFount::new(address, tcp_fount_tx.clone());
@@ -114,6 +132,8 @@ impl Server {
                 update_rx: pki_update_rx.clone(),
                 halt_rx: halt_rx.clone(),
                 slack_time: self.cfg.server.crypto_worker_slack_time,
+                clock: clock.clone(),
+                mix_keys: mix_keys.clone(),
             };
             start_crypto_worker(cfg);
         }

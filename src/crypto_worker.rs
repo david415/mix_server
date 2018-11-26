@@ -16,13 +16,25 @@
 
 
 extern crate crossbeam_channel;
+extern crate epoch;
+extern crate ecdh_wrapper;
 extern crate sphinx_replay_cache;
+extern crate sphinxcrypto;
 
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use packet::Packet;
+use std::collections::HashMap;
+
+use ecdh_wrapper::PrivateKey;
+use epoch::Clock;
 use crossbeam_channel::{Receiver, Select};
-use sphinx_replay_cache::MixKeys;
+use sphinx_replay_cache::{MixKeys, MixKey, Tag};
+use sphinxcrypto::server::sphinx_packet_unwrap;
+
+use super::packet::Packet;
+use super::errors::UnwrapPacketError;
+use super::constants;
 
 
 pub struct CryptoWorkerConfig {
@@ -30,6 +42,8 @@ pub struct CryptoWorkerConfig {
     pub update_rx: Receiver<bool>,
     pub halt_rx: Receiver<bool>,
     pub slack_time: u64,
+    pub clock: Clock,
+    pub mix_keys: MixKeys,
 }
 
 pub fn start_crypto_worker(cfg: CryptoWorkerConfig) {
@@ -38,7 +52,59 @@ pub fn start_crypto_worker(cfg: CryptoWorkerConfig) {
     });
 }
 
+fn unwrap_packet(packet: &mut Packet, clock: &Clock, shadow_mix_keys: &mut HashMap<u64, MixKey>) -> Result<(),UnwrapPacketError>{
+    // Figure out the candidate mix private keys for this packet.
+    let time = clock.now();
+    let mut keys: Vec<&mut MixKey> = vec![];
+    let mut epochs: Vec<u64> = vec![];
+
+    if !shadow_mix_keys.contains_key(&time.epoch) {
+        return Err(UnwrapPacketError::NoKey);
+    }
+    epochs.push(time.epoch);
+    if time.elapsed < constants::GRACE_PERIOD {
+        epochs.push(time.epoch - 1);
+    } else if time.till < constants::GRACE_PERIOD {
+        epochs.push(time.epoch + 1);
+    }
+
+    for epoch in epochs.iter_mut() {
+        let mut key = match shadow_mix_keys.get_mut(epoch) {
+            Some(x) => x,
+            None => {
+                continue
+            },
+        };
+        let (final_payload, replay_tag, cmds, err) = sphinx_packet_unwrap(key.private_key(), &mut packet.raw);
+        if err.is_some() {
+            continue
+        }
+
+        if let Some(tag) = replay_tag {
+            match key.is_replay(Tag::new(tag)) {
+                Ok(is_replay) => {
+                    if is_replay {
+                        warn!("packet replay detected");
+                        return Err(UnwrapPacketError::Replay)
+                    }
+                },
+                Err(e) => {
+                    warn!("replay cache errpr: {}", e);
+                    return Err(UnwrapPacketError::CacheFail)
+                },
+            }
+        }
+
+        // XXX
+        //packet.set_payload(final_payload);
+        //packet.set_cmds(cmds); // XXX
+    }
+    Ok(())
+}
+
 fn crypto_worker(cfg: CryptoWorkerConfig) {
+    let mut shadow_mix_keys: HashMap<u64, MixKey> = HashMap::new();
+    let clock = &cfg.clock;
     let mut sel = Select::new();
     let oper1 = sel.recv(&cfg.crypto_worker_rx);
     let oper2 = sel.recv(&cfg.update_rx);
@@ -55,11 +121,11 @@ fn crypto_worker(cfg: CryptoWorkerConfig) {
                         return
                     },
                 };
-
             },
             i if i == oper2 => {
                 oper.recv(&cfg.update_rx);
-                // XXX not yet implemented
+                let mut mix_keys = cfg.mix_keys.clone();
+                mix_keys.shadow(&mut shadow_mix_keys);
                 continue
             },
             i if i == oper3 => {
@@ -86,6 +152,13 @@ fn crypto_worker(cfg: CryptoWorkerConfig) {
             debug!("crypto worker packet queue delay {:?}", dwell_time);
         }
 
+        // Perform the crypto work here.
+        if let Err(e) = unwrap_packet(&mut packet, clock, &mut shadow_mix_keys) {
+            warn!("failed to unwrap packet: {}", e);
+            continue
+        }
+
+        // Route the packet.
         // XXX ...
     }
 }

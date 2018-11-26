@@ -131,7 +131,13 @@ fn reader(reader_rx: Receiver<Session>, crypto_worker_tx: Sender<Packet>, barrie
                 Command::SendPacket {
                     sphinx_packet
                 } => {
-                    let packet = Packet::new(sphinx_packet);
+                    let packet = match Packet::new(sphinx_packet) {
+                        Ok(x) => x,
+                        Err(e) => {
+                            warn!("invalid sphinx packet");
+                            continue
+                        },
+                    };
                     // XXX fixme: use select statement instead of single channel usage
                     if let Err(e) = crypto_worker_tx.send(packet) {
                         warn!("failed to send to crypto worker channel: {}", e);

@@ -38,6 +38,7 @@ pub struct Server {
     pub num_sphinx_workers: u16,
     pub num_crypto_workers: u16,
     pub crypto_worker_slack_time: u64,
+    pub line_rate: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

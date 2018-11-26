@@ -17,7 +17,7 @@ crossbeam = "0.5.0"
 crossbeam-channel = "0.3.0"
 crossbeam-utils = "0.6.1"
 crossbeam-thread = "0.0.0"
-atomic-counter = "1.0.1"
+epoch = { path = "../epoch" }
 rand = "^0.4.2"
 byteorder = "1.2.6"
 bloom = "0.3.2"
