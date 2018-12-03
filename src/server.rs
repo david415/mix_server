@@ -34,8 +34,8 @@ use super::constants;
 use super::config::Config;
 use super::tcp_listener::TcpStreamFount;
 use super::wire_worker::{WireConfig, start_wire_worker,
-                         PeerAuthenticatorFactory,
-                         StaticAuthenticatorFactory};
+                         PeerAuthenticatorBuilder,
+                         StaticAuthenticatorBuilder};
 use super::crypto_worker::{start_crypto_worker, CryptoWorkerConfig};
 
 
@@ -111,16 +111,17 @@ impl Server {
             self.incoming_conn_founts.push(fount);
         }
         for _ in 0..self.cfg.server.num_wire_workers {
-            let static_auth_factory = StaticAuthenticatorFactory {
+            let static_auth_builder = StaticAuthenticatorBuilder {
                 auth: self.peer_auth.clone(),
             };
-            let factory = PeerAuthenticatorFactory::Static(static_auth_factory);
+            let builder = PeerAuthenticatorBuilder::Static(static_auth_builder);
 
             let wire_cfg = WireConfig {
                 link_private_key: link_priv_key.clone(),
                 tcp_fount_rx: tcp_fount_rx.clone(),
                 crypto_worker_tx: crypto_worker_tx.clone(),
-                peer_auth_factory: factory,
+                peer_auth_builder: builder,
+                is_provider: self.cfg.server.is_provider,
             };
             start_wire_worker(wire_cfg);
         }
@@ -132,6 +133,7 @@ impl Server {
                 slack_time: self.cfg.server.crypto_worker_slack_time,
                 clock: clock.clone(),
                 mix_keys: mix_keys.clone(),
+                is_provider: self.cfg.server.is_provider,
             };
             start_crypto_worker(cfg);
         }

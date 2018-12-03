@@ -37,20 +37,20 @@ use mix_link::commands::Command;
 use packet::Packet;
 
 #[derive(PartialEq, Debug, Clone)]
-pub struct StaticAuthenticatorFactory {
+pub struct StaticAuthenticatorBuilder {
     pub auth: PeerAuthenticator,
 }
 
 #[derive(PartialEq, Debug, Clone)]
-pub enum PeerAuthenticatorFactory {
-    Static(StaticAuthenticatorFactory),
+pub enum PeerAuthenticatorBuilder {
+    Static(StaticAuthenticatorBuilder),
 }
 
-impl PeerAuthenticatorFactory {
+impl PeerAuthenticatorBuilder {
     fn build(&self) -> PeerAuthenticator {
         match *self {
-            PeerAuthenticatorFactory::Static(ref factory) => {
-                factory.auth.clone()
+            PeerAuthenticatorBuilder::Static(ref builder) => {
+                builder.auth.clone()
             },
         }
     }
@@ -62,7 +62,8 @@ pub struct WireConfig {
     pub link_private_key: PrivateKey,
     pub tcp_fount_rx: Receiver<TcpStream>,
     pub crypto_worker_tx: Sender<Packet>,
-    pub peer_auth_factory: PeerAuthenticatorFactory,
+    pub peer_auth_builder: PeerAuthenticatorBuilder,
+    pub is_provider: bool,
 }
 
 fn create_session(session_config: SessionConfig, stream: TcpStream) -> Result<Session, HandshakeError> {
@@ -78,7 +79,7 @@ fn session_dispatcher(reader_tx: Sender<Session>, barrier: Arc<Barrier>, cfg: Wi
         barrier.wait();
         if let Ok(stream) = cfg.tcp_fount_rx.recv() {
             let session_config = SessionConfig{
-                authenticator: cfg.peer_auth_factory.build(),
+                authenticator: cfg.peer_auth_builder.build(),
                 authentication_key: cfg.link_private_key.clone(),
                 peer_public_key: None,
                 additional_data: vec![],
@@ -101,7 +102,7 @@ fn session_dispatcher(reader_tx: Sender<Session>, barrier: Arc<Barrier>, cfg: Wi
     } // end of loop {
 }
 
-fn reader(reader_rx: Receiver<Session>, crypto_worker_tx: Sender<Packet>, barrier: Arc<Barrier>) {
+fn reader(reader_rx: Receiver<Session>, crypto_worker_tx: Sender<Packet>, barrier: Arc<Barrier>, is_provider: bool) {
     loop {
         barrier.wait();
         let mut session = match reader_rx.recv() {
@@ -122,31 +123,56 @@ fn reader(reader_rx: Receiver<Session>, crypto_worker_tx: Sender<Packet>, barrie
             };
             debug!("server received command {:?}", cmd);
 
-            match cmd {
+            if session.from_client() {
+                match &cmd {
+                    Command::RetrieveMessage {
+                        sequence,
+                    } => {
+                        debug!("Received RetrieveMessage from peer.");
+                        on_retrieve_message(&cmd);
+                        continue
+                    },
+                    Command::GetConsensus {
+                        epoch,
+                    } => {
+                        debug!("Received GetConsensus from peer.");
+                        on_get_consensus(&cmd);
+                        continue
+                    },
+                    _ => {},
+                }
+            }
+
+            match &cmd {
                 Command::NoOp{} => {
                     debug!("NoOp received!");
                 },
                 Command::SendPacket {
                     sphinx_packet
                 } => {
-                    let packet = match Packet::new(sphinx_packet) {
+                    let mut packet = match Packet::new(sphinx_packet) {
                         Ok(x) => x,
                         Err(e) => {
                             warn!("invalid sphinx packet: {}", e);
                             continue
                         },
                     };
+                    packet.must_forward = session.from_client();
+                    packet.must_terminate = is_provider && !session.from_client();
                     // XXX fixme: use select statement instead of single channel usage
                     if let Err(e) = crypto_worker_tx.send(packet) {
                         warn!("failed to send to crypto worker channel: {}", e);
                         return
                     }
                 },
+                Command::Disconnect{} => {
+
+                },
                 _ => {
                     debug!("received unhandled command");
                     continue
                 }
-            }
+            } // match cmd {
         }
     }
 }
@@ -163,6 +189,7 @@ pub fn start_wire_worker_runner(cfg: WireConfig) {
     let dispatcher_barrier = barrier.clone();
     let reader_barrier = barrier.clone();
     let crypto_worker_tx = cfg.crypto_worker_tx.clone();
+    let is_provider = cfg.is_provider;
 
     if let Err(_) = thread::scope(|scope| {
         let mut thread_handles = vec![];
@@ -170,12 +197,20 @@ pub fn start_wire_worker_runner(cfg: WireConfig) {
             session_dispatcher(reader_tx, dispatcher_barrier, cfg);
         })));
         thread_handles.push(Some(scope.spawn(move |_| {
-            reader(reader_rx, crypto_worker_tx, reader_barrier);
+            reader(reader_rx, crypto_worker_tx, reader_barrier, is_provider);
         })));
     }) {
         warn!("wire worker failed to spawn thread(s)");
         return
     }
+}
+
+fn on_retrieve_message(cmd: &Command) {
+
+}
+
+fn on_get_consensus(cmd: &Command) {
+
 }
 
 
@@ -185,7 +220,7 @@ mod tests {
     extern crate ecdh_wrapper;
     extern crate mix_link;
 
-    use std::{thread, time};
+    use std::thread;
     use std::time::Duration;
     use std::collections::HashMap;
     use std::net::{TcpListener, TcpStream};
@@ -215,10 +250,10 @@ mod tests {
         let peer_auth = PeerAuthenticator::Server(ServerAuthenticatorState{
             mix_map: mix_map,
         });
-        let static_auth_factory = StaticAuthenticatorFactory {
+        let static_auth_builder = StaticAuthenticatorBuilder {
             auth: peer_auth.clone(),
         };
-        let factory = PeerAuthenticatorFactory::Static(static_auth_factory);
+        let auth_builder = PeerAuthenticatorBuilder::Static(static_auth_builder);
 
         let (tcp_fount_tx, tcp_fount_rx) = unbounded();
         let (crypto_worker_tx, crypto_worker_rx) = unbounded();
@@ -226,7 +261,8 @@ mod tests {
             link_private_key: mix_priv_key,
             tcp_fount_rx: tcp_fount_rx,
             crypto_worker_tx: crypto_worker_tx,
-            peer_auth_factory: factory,
+            peer_auth_builder: auth_builder,
+            is_provider: true,
         };
         start_wire_worker(cfg);
 

@@ -23,9 +23,9 @@ byteorder = "1.2.6"
 bloom = "0.3.2"
 sled = "0.16.2"
 ecdh_wrapper = "0.0.7"
-sphinxcrypto = "0.0.15"
+sphinxcrypto = "0.0.16"
 sphinx_replay_cache = "0.0.1"
-mix_link = "0.0.4"
+mix_link = { path = "../mix_link" }
 
 [dev-dependencies]
 rustc-serialize = "0.3.24"

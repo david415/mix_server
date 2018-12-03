@@ -42,6 +42,7 @@ pub struct CryptoWorkerConfig {
     pub slack_time: u64,
     pub clock: Clock,
     pub mix_keys: MixKeys,
+    pub is_provider: bool,
 }
 
 pub fn start_crypto_worker(cfg: CryptoWorkerConfig) {
@@ -93,7 +94,9 @@ fn unwrap_packet(packet: &mut Packet, clock: &Clock, shadow_mix_keys: &mut HashM
         }
 
         packet.set_payload(final_payload);
-        //packet.set_cmds(cmds); // XXX
+        if let Some(commands) = cmds {
+            packet.set_commands(commands);
+        }
     }
     Ok(())
 }
@@ -151,13 +154,55 @@ fn crypto_worker(cfg: CryptoWorkerConfig) {
             debug!("crypto worker packet queue delay {:?}", dwell_time);
         }
 
-        // Perform the crypto work here.
+	// Attempt to unwrap the packet.
         if let Err(e) = unwrap_packet(&mut packet, clock, &mut shadow_mix_keys) {
             warn!("failed to unwrap packet: {}", e);
             continue
         }
 
         // Route the packet.
-        // XXX ...
+        if packet.is_forward() {
+            if packet.must_terminate {
+                debug!("Dropping packet: (Provider received forward packet from mix)");
+                continue
+            }
+
+	    // Check and adjust the delay for queue dwell time.
+            // XXX drop packet if delay is too big
+            // continue
+            // XXX
+            let packet_delay = Duration::from_millis(packet.delay.clone().unwrap().delay as u64);
+            if packet_delay > dwell_time {
+
+            // XXX } else if packet_delay == 0 {
+
+            } else {
+
+            }
+        } else if !cfg.is_provider {
+	    // This may be a decoy traffic response.
+            if packet.is_surb_reply() {
+                debug!("Handing off decoy response packet");
+                // XXX decoy_fsm.on_packet(packet)...
+                continue
+            }
+            debug!("Dropping invalid mix packet.");
+            continue
+        }
+
+        // This node is a provider and the packet is not destined for another
+	// node.  Both of the operations here end up hitting up disk among
+	// other things, so are just shunted off to a separate worker so that
+	// packet processing does not get blocked.
+        if packet.must_forward {
+            debug!("Dropping client packet");
+            continue
+        }
+
+        if packet.is_to_user() || packet.is_unreliable_to_user() || packet.is_surb_reply() {
+            // XXX Provider processing of packet here.
+        } else {
+            debug!("Dropping invalid user packet.");
+        }
     }
 }
