@@ -102,6 +102,7 @@ fn unwrap_packet(packet: &mut Packet, clock: &Clock, shadow_mix_keys: &mut HashM
 }
 
 fn crypto_worker(cfg: CryptoWorkerConfig) {
+    let absolute_minimum_delay = Duration::from_millis(1);
     let mut shadow_mix_keys: HashMap<u64, MixKey> = HashMap::new();
     let clock = &cfg.clock;
     let mut sel = Select::new();
@@ -160,7 +161,7 @@ fn crypto_worker(cfg: CryptoWorkerConfig) {
             continue
         }
 
-        // Route the packet.
+        // Route the packet to another mix.
         if packet.is_forward() {
             if packet.must_terminate {
                 debug!("Dropping packet: (Provider received forward packet from mix)");
@@ -168,17 +169,25 @@ fn crypto_worker(cfg: CryptoWorkerConfig) {
             }
 
 	    // Check and adjust the delay for queue dwell time.
-            // XXX drop packet if delay is too big
-            // continue
-            // XXX
-            let packet_delay = Duration::from_millis(packet.delay.clone().unwrap().delay as u64);
+            let delay = packet.delay_cmd.clone().unwrap().delay as u64;
+            let packet_delay = Duration::from_millis(delay);
             if packet_delay > dwell_time {
-
-            // XXX } else if packet_delay == 0 {
-
+                packet.delay = delay - dwell_time.as_millis() as u64;
+            } else if delay == 0 {
+                if dwell_time < absolute_minimum_delay {
+                    let delta = absolute_minimum_delay - dwell_time;
+                    packet.delay = delta.as_millis() as u64;
+                } else {
+                    debug!("Dropping packet: (delay: {:?})", dwell_time);
+                    continue
+                }
             } else {
-
+                packet.delay = absolute_minimum_delay.as_millis() as u64;
             }
+
+            // Hand off to the scheduler.
+            debug!("Dispatching packet");
+            // XXX todo: send packet to mix strategy AQM
         } else if !cfg.is_provider {
 	    // This may be a decoy traffic response.
             if packet.is_surb_reply() {

@@ -31,7 +31,8 @@ pub struct Packet {
     pub next_hop: Option<NextHop>,
     pub recipient: Option<Recipient>,
     pub surb_reply: Option<SURBReply>,
-    pub delay: Option<Delay>,
+    pub delay_cmd: Option<Delay>,
+    pub delay: u64,
     pub must_forward: bool,
     pub must_terminate: bool,
 }
@@ -46,7 +47,8 @@ impl Default for Packet {
             next_hop: None,
             recipient: None,
             surb_reply: None,
-            delay: None,
+            delay_cmd: None,
+            delay: 0,
             must_forward: false,
             must_terminate: false,
         }
@@ -76,7 +78,8 @@ impl Packet {
             next_hop: None,
             recipient: None,
             surb_reply: None,
-            delay: None,
+            delay_cmd: None,
+            delay: 0,
             must_forward: false,
             must_terminate: false,
         })
@@ -98,30 +101,30 @@ impl Packet {
                 RoutingCommand::SURBReply(surb_reply) => {
                     self.surb_reply = Some(surb_reply.clone());
                 },
-                RoutingCommand::Delay(delay) => {
-                    self.delay = Some(delay.clone());
+                RoutingCommand::Delay(delay_cmd) => {
+                    self.delay_cmd = Some(delay_cmd.clone());
                 },
             }
         }
     }
 
     pub fn is_forward(&self) -> bool {
-        self.next_hop.is_none() && self.delay.is_some() &&
+        self.next_hop.is_none() && self.delay_cmd.is_some() &&
             self.recipient.is_some() && self.surb_reply.is_none()
     }
 
     pub fn is_to_user(&self) -> bool {
-        self.next_hop.is_none() && self.delay.is_some() &&
+        self.next_hop.is_none() && self.delay_cmd.is_some() &&
             self.recipient.is_some() && self.surb_reply.is_none()
     }
 
     pub fn is_unreliable_to_user(&self) -> bool {
-        self.next_hop.is_none() && self.delay.is_none() && self.recipient.is_some() &&
+        self.next_hop.is_none() && self.delay_cmd.is_none() && self.recipient.is_some() &&
             self.surb_reply.is_none()
     }
 
     pub fn is_surb_reply(&self) -> bool {
-        self.next_hop.is_none() && self.delay.is_none() &&
+        self.next_hop.is_none() && self.delay_cmd.is_none() &&
             self.recipient.is_some() && self.surb_reply.is_some()
     }
 }

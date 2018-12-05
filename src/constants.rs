@@ -1,4 +1,4 @@
-// lib.rs - Crate for implementing mix servers.
+// config.rs - Mix server configuration.
 // Copyright (C) 2018  David Anthony Stainton.
 //
 // This program is free software: you can redistribute it and/or modify
@@ -14,35 +14,9 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-#![feature(mpsc_select)]
-#![feature(duration_as_u128)]
+/// The number of mix keys to generate and publish.
+pub const NUM_MIX_KEYS: u8 = 3;
 
-#[macro_use]
-extern crate serde_derive;
-extern crate serde;
-extern crate crossbeam;
-extern crate crossbeam_utils;
-extern crate crossbeam_channel;
-extern crate crossbeam_thread;
 
-#[macro_use]
-extern crate log;
-extern crate log4rs;
-extern crate toml;
-extern crate bloom;
-extern crate sled;
-
-extern crate epoch;
-extern crate ecdh_wrapper;
-extern crate mix_link;
-extern crate sphinxcrypto;
-extern crate sphinx_replay_cache;
-
-pub mod server;
-pub mod config;
-pub mod constants;
-pub mod errors;
-pub mod packet;
-pub mod tcp_listener;
-pub mod wire_worker;
-pub mod crypto_worker;
+/// The number
+pub const GRACE_PERIOD: u64 = 3;
